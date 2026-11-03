@@ -25,7 +25,12 @@ async (page) => {
     window.chrome.runtime = {
       sendMessage: (message, callback) => {
         window.__tahMessages = [...(window.__tahMessages || []), message];
-        const reply = message?.type === 'tah-fetch-ical' ? { ok: true, text: window.__tahIcalText || '' } : { ok: true };
+        // One text for every feed, or one per address via __tahIcalTexts.
+        const texts = window.__tahIcalTexts || {};
+        const reply =
+          message?.type === 'tah-fetch-ical'
+            ? { ok: true, text: texts[message.url] ?? window.__tahIcalText ?? '' }
+            : { ok: true };
         if (callback) callback(reply);
         return Promise.resolve(reply);
       },

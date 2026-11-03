@@ -158,15 +158,23 @@ statistics.
 
 ## Kalender
 
-Your own calendar can show up in the week view, so you can book availability
+Your own calendars can show up in the week view, so you can book availability
 around your appointments instead of keeping them in your head. Paste the secret
-**iCal address** of your calendar into the settings (**Einstellungen …** →
-*Kalender (iCal)*). Blocks that collide with an appointment then get a red stripe
-on the left; the appointment's time and title are in the tooltip of that cell,
-and the day header's tooltip lists everything on that day — which is also where
-all-day entries like "Urlaub" show up, since they have no time to stripe.
+**iCal addresses** into the settings (**Einstellungen …** → *Kalender (iCal)*),
+one row per calendar, and give each a name and a colour — **Kalender
+hinzufügen** adds another. Blocks that collide with an appointment then get a
+stripe on the left in that calendar's colour; the appointment's time and title
+are in the tooltip of that cell, and the day header's tooltip lists everything on
+that day — which is also where all-day entries like "Urlaub" show up, since they
+have no time to stripe.
 
-Where the address comes from:
+Above the grid, one chip per calendar is the switch for the week view: click it
+to hide that calendar, click again to bring it back. The choice is remembered, so
+a work calendar you only need on Mondays can stay hidden. Hiding a calendar costs
+nothing — its events are already loaded, so they come back instantly. The
+**zeigen** checkbox in the settings does the same thing from the other side.
+
+Where the addresses come from:
 
 - **Google Calendar:** Settings → the calendar → **Integrate calendar** → *Secret
   address in iCal format*.
@@ -176,24 +184,26 @@ Where the address comes from:
 - **WebDAV/CalDAV servers** (Nextcloud, mailbox.org, …) often hand out a
   `webdav://` or `webdavs://` link; those work as they are too.
 
-`https://`, `webcal://` and `webdav://` are all accepted. The address is stored
+`https://`, `webcal://` and `webdav://` are all accepted. An address is stored
 exactly as pasted and only rewritten to `http(s)://` when it is fetched — a
 `webdav://` link is tried over TLS first and over plain HTTP if that fails.
 
-The address is a secret — anyone who has it can read the calendar. It stays in
-this browser (local storage, not synced) and is only used to load the events.
-Chrome asks once for permission to read from that one server and nothing else;
-**Verbindung prüfen** shows how many events the feed yields for the next week
-before you rely on it.
+The addresses are secrets — anyone who has one can read that calendar. They stay
+in this browser (local storage, not synced) and are only used to load the events.
+Chrome asks once for permission to read from those servers and nothing else;
+**Verbindungen prüfen** shows per row how many events each feed yields for the
+next week before you rely on it.
 
-The feed is fetched at most every 15 minutes; **Aktualisieren** above the grid
-forces it. A failed load says so in red with an **Erneut** button instead of
-quietly showing an empty week.
+Each feed is fetched at most every 15 minutes; **Aktualisieren** above the grid
+forces it. A feed that fails keeps the last copy it delivered and says so — the
+chip turns red, the bar names the calendar and its **Erneut** button retries —
+instead of quietly showing an empty week. A calendar that fails once does not
+take the others down with it.
 
 Recurring events are expanded (daily/weekly/monthly rules, exceptions, moved
 occurrences), feed times are converted from their own time zone to local time,
 and all-day entries stay in the day-header tooltip only — a single "Urlaub"
-should not grey out the whole week. The feed is read, never written.
+should not grey out the whole week. The feeds are read, never written.
 
 ## Monatsrechnung
 
@@ -343,6 +353,12 @@ browser_run_code_unsafe({ filename: "tools/dev-inject.js" })
 ```
 
 `tools/make_icons.py` regenerates the PNG icons.
+
+The week view needs no login to look at either: serve the repo root with
+`python3 -m http.server 8817`, open
+<http://127.0.0.1:8817/tools/grid-harness.html> (a stand-in availability grid),
+seed `window.__tahLocal.icalFeeds` and `window.__tahIcalTexts`, then run
+`tools/dev-inject.js` as above.
 
 The statistics view needs no login to look at: serve the repo root with
 `python3 -m http.server 8817` and open

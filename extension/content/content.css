@@ -255,22 +255,77 @@
 }
 
 /* Calendar feed: events live in the day-header tooltip, colliding blocks get a
-   stripe. Nothing is drawn into the grid itself. */
+   stripe. Nothing is drawn into the grid itself. The chips above the table are
+   the per-calendar switch; their dot and the stripe share --tah-feed. */
 #tah-block-view .tah-cal-bar {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 5px;
   margin: 0 0 6px;
   font-size: 11px;
   color: #7b8590;
 }
 
-#tah-block-view .tah-cal-bar.tah-cal-error {
+#tah-block-view .tah-cal-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#tah-block-view .tah-cal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid #d7dde4;
+  border-radius: 9px;
+  background: #fff;
+  color: #45505b;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+#tah-block-view .tah-cal-chip:hover {
+  border-color: var(--tah-feed, #b3261e);
+}
+
+#tah-block-view .tah-cal-chip:focus-visible {
+  outline: 2px solid var(--tah-feed, #b3261e);
+  outline-offset: 1px;
+}
+
+#tah-block-view .tah-cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tah-feed, #b3261e);
+}
+
+/* Hidden calendar: hollow dot, dashed outline — still there, just not drawn. */
+#tah-block-view .tah-cal-chip.tah-cal-off {
+  border-style: dashed;
+  color: #a9b2bb;
+}
+
+#tah-block-view .tah-cal-chip.tah-cal-off .tah-cal-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--tah-feed, #b3261e);
+  opacity: 0.55;
+}
+
+#tah-block-view .tah-cal-chip.tah-cal-broken {
+  border-color: #b3261e;
+}
+
+#tah-block-view .tah-cal-broken-text {
   color: #b3261e;
 }
 
 #tah-block-view .tah-block-conflict {
-  box-shadow: inset 3px 0 0 #b3261e;
+  box-shadow: inset 3px 0 0 var(--tah-feed, #b3261e);
 }
 
 #tah-panel .tah-status {

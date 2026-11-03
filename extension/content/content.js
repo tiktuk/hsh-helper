@@ -25,7 +25,7 @@ const state = {
   busy: false,
   undo: null,
   undoTimeout: null,
-  calendar: { url: '', on: true, days: {}, fetchedAt: 0, error: '' },
+  calendar: { feeds: [], on: true, days: {}, fetchedAt: 0 },
   invoicePreview: null,
   invoiceToken: 0,
 };
@@ -398,7 +398,12 @@ function blockCellNode(cells, label, when) {
   const clashes = when ? conflictsOn(when.dateKey, when.startMin, when.endMin) : [];
   if (clashes.length) {
     td.classList.add('tah-block-conflict');
-    td.title = clashes.map((entry) => `Termin ${clockLabel(entry.start)}–${clockLabel(entry.end)}: ${entry.title}`).join('\n');
+    // The stripe takes the colour of the calendar it collides with; with
+    // several at once the earliest one wins, the tooltip names them all.
+    td.style.setProperty('--tah-feed', clashes[0].color || FEED_COLORS[0]);
+    td.title = clashes
+      .map((entry) => `Termin ${clockLabel(entry.start)}–${clockLabel(entry.end)}: ${eventLabel(entry)}`)
+      .join('\n');
   }
 
   if (info.counts) {
@@ -568,6 +573,11 @@ function applyView() {
 
 const CALENDAR_TTL = 15 * 60 * 1000;
 
+// One colour per calendar, so a chip and the stripe of the block it collides
+// with can be told apart. Mirrored in options.js, which lets the colour be
+// picked; a feed without one falls back by its position.
+const FEED_COLORS = ['#b3261e', '#1e4b8c', '#2e7d32', '#6a1b9a', '#ef6c00', '#00695c'];
+
 // The columns are dated by their cells, not by the header text, which the site
 // renders with its own abbreviations.
 function dateKeyOf(td) {
@@ -596,82 +606,243 @@ function conflictsOn(dateKey, startMin, endMin) {
 
 // Events are not drawn — the day header only carries them in its tooltip, and a
 // colliding block gets a stripe. Keeps the grid readable at a glance.
-function dayTooltip(dateKey) {
-  return dayEvents(dateKey)
-    .map((entry) =>
-      entry.allDay ? `${entry.title} (ganztägig)` : `${clockLabel(entry.start)}–${clockLabel(entry.end)} ${entry.title}`
-    )
-    .join('\n');
+// A feed's name rides along in the tooltip, but only once there is more than
+// one calendar: with a single feed it would just be noise.
+function eventLabel(entry) {
+  return entry.feed ? `${entry.title} (${entry.feed})` : entry.title;
 }
 
-function calendarBar() {
-  const calendar = state.calendar;
-  if (!calendar.url || !calendar.on) return null;
+function eventLine(entry) {
+  if (entry.allDay) return `${entry.title} (ganztägig${entry.feed ? `, ${entry.feed}` : ''})`;
+  return `${clockLabel(entry.start)}–${clockLabel(entry.end)} ${eventLabel(entry)}`;
+}
 
-  const bar = el('div', { class: 'tah-cal-bar' });
-  if (calendar.error) {
-    bar.classList.add('tah-cal-error');
-    bar.append(el('span', { text: `Kalender: ${calendar.error}` }));
-  } else {
-    const count = Object.values(calendar.days).reduce((sum, list) => sum + list.length, 0);
-    const when = calendar.fetchedAt
-      ? new Date(calendar.fetchedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-      : '';
-    bar.append(
-      el('span', {
-        text: `Kalender: ${count} ${count === 1 ? 'Eintrag' : 'Einträge'} diese Woche${when ? ` · ${when}` : ''}`,
-      })
-    );
+function dayTooltip(dateKey) {
+  return dayEvents(dateKey).map(eventLine).join('\n');
+}
+
+function timeLabel(ms) {
+  return new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+// A feed without a name is labelled by its server, which is enough to tell two
+// calendars apart and needs no upkeep.
+function feedTitle(feed) {
+  if (feed.label) return feed.label;
+  const match = /^[a-z][a-z0-9+.-]*:/i.exec(String(feed.url || ''));
+  if (!match) return 'Kalender';
+  try {
+    return new URL(`https:${feed.url.slice(match[0].length)}`).hostname || 'Kalender';
+  } catch {
+    return 'Kalender';
   }
+}
 
-  const refresh = el('button', { class: 'tah-link', type: 'button', text: calendar.error ? 'Erneut' : 'Aktualisieren' });
-  refresh.addEventListener('click', () => loadCalendar(true).then(refreshBlockView));
-  bar.append(' ', refresh);
-  return bar;
+// `icalFeeds` is the current shape. `icalUrl` is the single feed the extension
+// had before it could hold several, and is still read so an existing setup keeps
+// working until the settings page is saved once.
+function readFeedList(stored) {
+  const list = Array.isArray(stored.icalFeeds) ? stored.icalFeeds : [];
+  const feeds = list
+    .filter((feed) => feed && typeof feed.url === 'string' && feed.url.trim())
+    .map((feed, index) => ({
+      id: typeof feed.id === 'string' && feed.id ? feed.id : `feed-${index + 1}`,
+      url: feed.url.trim(),
+      label: typeof feed.label === 'string' ? feed.label.trim() : '',
+      color: typeof feed.color === 'string' ? feed.color : '',
+      on: feed.on !== false,
+    }));
+  if (feeds.length || !stored.icalUrl) return feeds;
+  const legacy = String(stored.icalUrl).trim();
+  return legacy ? [{ id: 'feed-1', url: legacy, label: '', color: '', on: true }] : [];
+}
+
+// The grid does not care which calendar an entry came from, so the enabled feeds
+// are merged into one day map and sorted by start. Name and colour ride along on
+// each entry for the tooltip and the stripe.
+function mergeCalendarDays() {
+  const calendar = state.calendar;
+  const named = calendar.feeds.filter((feed) => feed.on).length > 1;
+  const days = {};
+  let fetchedAt = 0;
+  for (const feed of calendar.feeds) {
+    if (!feed.on) continue;
+    fetchedAt = Math.max(fetchedAt, feed.fetchedAt || 0);
+    for (const [dateKey, list] of Object.entries(feed.days || {})) {
+      if (!days[dateKey]) days[dateKey] = [];
+      for (const entry of list) days[dateKey].push({ ...entry, feed: named ? feedTitle(feed) : '', color: feed.color });
+    }
+  }
+  for (const list of Object.values(days)) list.sort((a, b) => a.start - b.start);
+  calendar.days = days;
+  calendar.fetchedAt = fetchedAt;
+}
+
+function storedFeed(feed) {
+  return { id: feed.id, url: feed.url, label: feed.label, color: feed.color, on: feed.on };
 }
 
 async function loadCalendarSettings() {
-  const stored = await chrome.storage.local.get({ icalUrl: '', icalOn: true });
-  state.calendar.url = typeof stored.icalUrl === 'string' ? stored.icalUrl.trim() : '';
+  const stored = await chrome.storage.local.get({ icalFeeds: null, icalUrl: '', icalOn: true });
+  const known = new Map(state.calendar.feeds.map((feed) => [feed.id, feed]));
+  state.calendar.feeds = readFeedList(stored).map((feed, index) => {
+    // Days already fetched survive a settings change, but only for the same
+    // address: editing a URL must not keep showing the old calendar's entries.
+    const previous = known.get(feed.id);
+    const reuse = previous && previous.url === feed.url;
+    return {
+      ...feed,
+      color: feed.color || FEED_COLORS[index % FEED_COLORS.length],
+      days: reuse ? previous.days : {},
+      fetchedAt: reuse ? previous.fetchedAt : 0,
+      error: reuse ? previous.error : '',
+    };
+  });
   state.calendar.on = stored.icalOn !== false;
+  mergeCalendarDays();
 }
 
-async function feedText(url, force) {
-  const { icalCache } = await chrome.storage.local.get({ icalCache: null });
-  const cached = icalCache && icalCache.url === url && Date.now() - icalCache.fetchedAt < CALENDAR_TTL;
-  if (!force && cached) return { text: icalCache.text, fetchedAt: icalCache.fetchedAt };
+// The cache used to hold one feed ({ url, text, fetchedAt }); it is a map keyed
+// by address now, so every calendar keeps its own copy.
+function cacheMap(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  if (typeof raw.url === 'string' && typeof raw.text === 'string') {
+    return { [raw.url]: { text: raw.text, fetchedAt: Number(raw.fetchedAt) || 0 } };
+  }
+  return raw;
+}
+
+// The text of one feed. Nothing is written here: the feeds are fetched in
+// parallel, and a write per feed would have each of them save the cache as it
+// looked before the others answered, dropping their entries. The caller
+// collects the fresh copies and saves once (saveCalendarCache).
+async function feedText(url, force, cache) {
+  const cached = cache[url];
+  if (!force && cached && Date.now() - cached.fetchedAt < CALENDAR_TTL) {
+    return { text: cached.text, fetchedAt: cached.fetchedAt };
+  }
 
   // The worker fetches, not this script: a feed on another host is a
   // cross-origin request from the page's origin and would hit CORS here.
-  const reply = await chrome.runtime.sendMessage({ type: 'tah-fetch-ical', url });
-  if (!reply || !reply.ok) throw new Error(reply?.error || 'Kalender nicht erreichbar.');
-  const fetchedAt = Date.now();
-  await chrome.storage.local.set({ icalCache: { url, text: reply.text, fetchedAt } });
-  return { text: reply.text, fetchedAt };
+  try {
+    const reply = await chrome.runtime.sendMessage({ type: 'tah-fetch-ical', url });
+    if (!reply || !reply.ok) throw new Error(reply?.error || 'Kalender nicht erreichbar.');
+    return { text: reply.text, fetchedAt: Date.now(), fresh: true };
+  } catch (err) {
+    // A dead feed keeps its last good text instead of dropping out of the week;
+    // the bar names it and says how old the text is.
+    if (cached) return { text: cached.text, fetchedAt: cached.fetchedAt, stale: err.message };
+    throw err;
+  }
+}
+
+async function loadFeed(feed, dayKeys, force, cache, fresh) {
+  try {
+    const { text, fetchedAt, stale, fresh: isFresh } = await feedText(feed.url, force, cache);
+    feed.days = TAH_ICAL.eventsByDay(text, dayKeys);
+    feed.fetchedAt = fetchedAt;
+    feed.error = stale || '';
+    if (isFresh) fresh[feed.url] = { text, fetchedAt };
+  } catch (err) {
+    // Whatever this feed had stays on screen: one dead calendar must not blank
+    // the others.
+    feed.error = err.message;
+  }
+}
+
+// Every feed's text sits in local storage and the quota is shared, so a calendar
+// that was removed must not keep its copy. Calendars that are switched off do
+// keep theirs — switching them back on is then instant.
+async function saveCalendarCache(cache, fresh) {
+  const next = {};
+  let changed = false;
+  for (const feed of state.calendar.feeds) {
+    const entry = fresh[feed.url] || cache[feed.url];
+    if (entry) next[feed.url] = entry;
+    if (fresh[feed.url]) changed = true;
+  }
+  if (!changed) changed = Object.keys(cache).some((url) => !next[url]);
+  if (changed) await chrome.storage.local.set({ icalCache: next });
 }
 
 async function loadCalendar(force = false) {
   const calendar = state.calendar;
   const grid = readGrid();
-  if (!calendar.url || !calendar.on || !grid) {
+  const feeds = calendar.feeds.filter((feed) => feed.on);
+  if (!calendar.on || !feeds.length || !grid) {
     calendar.days = {};
-    calendar.error = '';
+    calendar.fetchedAt = 0;
     return;
   }
   if (typeof TAH_ICAL === 'undefined') {
-    calendar.error = 'Kalender-Parser fehlt.';
+    for (const feed of feeds) feed.error = 'Kalender-Parser fehlt.';
     return;
   }
 
-  try {
-    const { text, fetchedAt } = await feedText(calendar.url, force);
-    calendar.days = TAH_ICAL.eventsByDay(text, [...new Set(columnKeys(grid).filter(Boolean))]);
-    calendar.fetchedAt = fetchedAt;
-    calendar.error = '';
-  } catch (err) {
-    calendar.days = {};
-    calendar.error = err.message;
+  const { icalCache } = await chrome.storage.local.get({ icalCache: null });
+  const cache = cacheMap(icalCache);
+  const fresh = {};
+  const dayKeys = [...new Set(columnKeys(grid).filter(Boolean))];
+  await Promise.all(feeds.map((feed) => loadFeed(feed, dayKeys, force, cache, fresh)));
+  mergeCalendarDays();
+  await saveCalendarCache(cache, fresh);
+}
+
+// The chips above the grid are the per-calendar switch. Hiding one only drops it
+// from the merged week — its text stays cached, so switching it back is instant.
+// The choice is written back to the settings, so it survives a reload.
+async function toggleFeed(id) {
+  const feed = state.calendar.feeds.find((entry) => entry.id === id);
+  if (!feed) return;
+  feed.on = !feed.on;
+  mergeCalendarDays();
+  refreshBlockView();
+  await chrome.storage.local.set({ icalFeeds: state.calendar.feeds.map(storedFeed) });
+  if (feed.on && !feed.fetchedAt) loadCalendar().then(refreshBlockView);
+}
+
+function calendarBar() {
+  const calendar = state.calendar;
+  if (!calendar.on || !calendar.feeds.length) return null;
+
+  const bar = el('div', { class: 'tah-cal-bar' });
+
+  const chips = el('span', { class: 'tah-cal-chips' });
+  for (const feed of calendar.feeds) {
+    const chip = el('button', {
+      class: `tah-cal-chip${feed.on ? '' : ' tah-cal-off'}${feed.on && feed.error ? ' tah-cal-broken' : ''}`,
+      type: 'button',
+      title: feed.error
+        ? `${feedTitle(feed)}: ${feed.error}${feed.fetchedAt ? ` (Stand ${timeLabel(feed.fetchedAt)})` : ''}`
+        : `${feedTitle(feed)} ${feed.on ? 'ausblenden' : 'anzeigen'}`,
+    });
+    chip.style.setProperty('--tah-feed', feed.color || FEED_COLORS[0]);
+    chip.setAttribute('aria-pressed', feed.on ? 'true' : 'false');
+    chip.append(el('i', { class: 'tah-cal-dot' }), el('span', { text: feedTitle(feed) }));
+    chip.addEventListener('click', () => toggleFeed(feed.id));
+    chips.append(chip);
   }
+  bar.append(chips);
+
+  const count = Object.values(calendar.days).reduce((sum, list) => sum + list.length, 0);
+  const when = calendar.fetchedAt ? ` · ${timeLabel(calendar.fetchedAt)}` : '';
+  bar.append(el('span', { text: `${count} ${count === 1 ? 'Eintrag' : 'Einträge'} diese Woche${when}` }));
+
+  const broken = calendar.feeds.filter((feed) => feed.on && feed.error);
+  if (broken.length) {
+    bar.append(
+      el('span', {
+        class: 'tah-cal-broken-text',
+        text: broken.length === 1 && calendar.feeds.length === 1 ? `Kalender: ${broken[0].error}` : `${broken.length} Kalender nicht erreichbar`,
+        title: broken.map((feed) => `${feedTitle(feed)}: ${feed.error}`).join('\n'),
+      })
+    );
+  }
+
+  const refresh = el('button', { class: 'tah-link', type: 'button', text: broken.length ? 'Erneut' : 'Aktualisieren' });
+  refresh.addEventListener('click', () => loadCalendar(true).then(refreshBlockView));
+  bar.append(' ', refresh);
+  return bar;
 }
 
 /* ---------- UI ---------- */
@@ -835,10 +1006,13 @@ function applyNavLabels() {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  // The feed URL is a secret and lives in local storage, next to its cache.
-  if (area === 'local' && (changes.icalUrl || changes.icalOn)) {
+  // The feed addresses are secrets and live in local storage, next to their
+  // cache. A change can come from the settings page or from a chip click here;
+  // either way the cache answers for the feeds that did not change, so this is
+  // not a forced reload.
+  if (area === 'local' && (changes.icalFeeds || changes.icalUrl || changes.icalOn)) {
     loadCalendarSettings()
-      .then(() => loadCalendar(true))
+      .then(() => loadCalendar(false))
       .then(() => refreshBlockView());
     return;
   }

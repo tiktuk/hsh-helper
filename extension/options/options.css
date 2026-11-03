@@ -148,6 +148,77 @@ h2 {
   margin-top: 18px;
 }
 
+/* One calendar per row: address, name, colour, on/off, remove. The status line
+   spans the row underneath and stays out of the way while it is empty. */
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10rem 2.4rem auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.feed-row input[type='url'],
+.feed-row input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.feed-row input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.feed-row input[type='color'] {
+  width: 2.4rem;
+  height: 27px;
+  padding: 2px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.feed-row .feed-on {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #555;
+}
+
+.feed-row .feed-on input {
+  width: auto;
+  margin: 0;
+}
+
+.feed-row .feed-remove {
+  padding: 5px 9px;
+  font-weight: 400;
+}
+
+.feed-status {
+  grid-column: 1 / -1;
+}
+
+.feed-status:empty {
+  display: none;
+}
+
+.feed-actions {
+  margin-top: 10px;
+}
+
 button {
   padding: 8px 16px;
   border: 1px solid var(--accent);

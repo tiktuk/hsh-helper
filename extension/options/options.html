@@ -117,26 +117,25 @@
 
     <section>
       <h2>Kalender (iCal)</h2>
-      <label class="field">
-        <span>iCal-Adresse</span>
-        <input id="icalUrl" type="url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" spellcheck="false" />
-      </label>
-      <p class="hint">
-        <code>https://</code>, <code>webcal://</code> und <code>webdav://</code> werden angenommen; die Adresse wird
-        unverändert gespeichert und erst beim Laden auf http(s) umgeschrieben.
-      </p>
+      <div id="icalFeeds" class="feed-list"></div>
+      <div class="actions feed-actions">
+        <button id="icalAdd" class="secondary" type="button">Kalender hinzufügen</button>
+        <button id="icalCheck" class="secondary" type="button">Verbindungen prüfen</button>
+      </div>
+      <p id="icalStatus" class="hint"></p>
       <label class="field">
         <span>Anzeige</span>
         <span class="inline"><input id="icalOn" type="checkbox" /> Termine in der Wochenansicht anzeigen</span>
       </label>
-      <div class="actions">
-        <button id="icalCheck" class="secondary" type="button">Verbindung prüfen</button>
-      </div>
-      <p id="icalStatus" class="hint"></p>
       <p class="hint">
-        Die Adresse ist ein Geheimnis: wer sie kennt, liest den Kalender. Sie bleibt auf diesem Rechner (nicht
-        synchronisiert) und wird nur zum Laden der Termine verwendet. Beim ersten Speichern fragt Chrome nach der
-        Erlaubnis für genau diesen Server.
+        Mehrere Kalender werden in der Wochenansicht zusammengeführt; die Chips über dem Raster blenden jeden einzeln
+        aus. <code>https://</code>, <code>webcal://</code> und <code>webdav://</code> werden angenommen; die Adresse
+        wird unverändert gespeichert und erst beim Laden auf http(s) umgeschrieben.
+      </p>
+      <p class="hint">
+        Die Adressen sind ein Geheimnis: wer sie kennt, liest den Kalender. Sie bleiben auf diesem Rechner (nicht
+        synchronisiert) und werden nur zum Laden der Termine verwendet. Beim ersten Speichern fragt Chrome nach der
+        Erlaubnis für genau diese Server.
       </p>
     </section>
 

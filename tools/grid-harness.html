@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<title>Verfügbarkeiten – Stand-in</title>
+<style>
+  body { margin: 16px; font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  table.available-table { border-collapse: collapse; }
+  table.available-table td,
+  table.available-table th { border: 1px solid #e3e6ea; padding: 0 4px; font-size: 10px; }
+  table.available-table td { width: 64px; height: 8px; }
+  .not_set { background: #f2f2f2; }
+  .available_no_bookings { background: #dff0d8; }
+  .not_available_no_bookings { background: #f2dede; }
+</style>
+</head>
+<body>
+<!--
+  Stand-in for https://hsh.gomus.de/guide/availables: the markup the block view
+  reads, without a login and without touching live availability. Serve the repo
+  root over HTTP and inject the content script into it with tools/dev-inject.js
+  (see AGENTS.md, Verification). The grid is 288 five-minute rows x 7 day
+  columns starting on the Monday of the current week.
+-->
+<div class="row">
+  <table class="available-table">
+    <thead><tr id="tah-harness-head"><th>Zeit</th></tr></thead>
+    <tbody id="tah-harness-body"></tbody>
+  </table>
+</div>
+<script>
+  (function build() {
+    const head = document.querySelector('#tah-harness-head');
+    const body = document.querySelector('#tah-harness-body');
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
+
+    const weekdays = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+    for (let d = 0; d < 7; d += 1) {
+      const day = new Date(start);
+      day.setDate(day.getDate() + d);
+      const th = document.createElement('th');
+      const small = document.createElement('small');
+      small.textContent = `${weekdays[d]} ${String(day.getDate()).padStart(2, '0')}.${String(day.getMonth() + 1).padStart(2, '0')}`;
+      th.append(small);
+      // the real header also carries a hidden dropdown; keep a stand-in so a
+      // regression that reads th.innerText instead of th > small shows up
+      const hidden = document.createElement('div');
+      hidden.className = 'hidden';
+      hidden.textContent = 'Kernzeit auf verfügbar setzen';
+      th.append(hidden);
+      head.append(th);
+    }
+
+    for (let i = 0; i < 288; i += 1) {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.className = 'time';
+      th.textContent = `${String(Math.floor((i * 5) / 60)).padStart(2, '0')}:${String((i * 5) % 60).padStart(2, '0')}`;
+      tr.append(th);
+      for (let d = 0; d < 7; d += 1) {
+        const at = new Date(start);
+        at.setDate(at.getDate() + d);
+        at.setHours(0, i * 5, 0, 0);
+        const ts = Math.floor(at.getTime() / 1000);
+        const td = document.createElement('td');
+        // a third of the cells available, so the summary has all three kinds
+        td.className = `timestampbutton available-table-cell clickable ${i % 3 === 0 ? 'available_no_bookings' : i % 3 === 1 ? 'not_set' : 'not_available_no_bookings'}`;
+        td.dataset.timestamp = String(ts);
+        td.id = `avail_${ts}`;
+        td.append(document.createElement('i'));
+        tr.append(td);
+      }
+      body.append(tr);
+    }
+  })();
+</script>
+</body>
+</html>

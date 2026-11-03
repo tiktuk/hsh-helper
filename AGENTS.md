@@ -15,11 +15,12 @@ this file is for working on it.
 - `extension/vendor/chart.umd.min.js` – Chart.js 4.4.7 UMD, vendored unchanged (see Statistics).
 - `extension/assets/bike.jpg` – the guide's cargo e-bike, shown in the statistics card (see Statistics).
 - `extension/popup/` – settings (block length, preset times, working-hours window); links to the settings page.
-- `extension/options/` – invoice letterhead (sender, recipient, Steuernummer, bank, texts, signature, number range), the iCal feed address, the statistics assumptions and the bike photo.
+- `extension/options/` – invoice letterhead (sender, recipient, Steuernummer, bank, texts, signature, number range), the list of iCal feed addresses, the statistics assumptions and the bike photo.
 - `extension/background.js` – service worker; opens the invoice tab (`chrome.tabs.create`) and fetches the calendar feed (see Calendar feed).
 - `extension/invoice/` – the printable invoice page (`chrome-extension://` URL): rows from `chrome.storage.local`, letter from the settings.
 - `tools/dev-inject.js` – loads the content script into an already-open page (see Verification).
 - `tools/stats-harness.html` – opens the stats view with mock bookings, without login or extension (see Statistics).
+- `tools/grid-harness.html` – a stand-in availability grid for the block view, without login (see Verification).
 - `tools/make_icons.py` – regenerates `extension/icons/*.png`.
 
 No build step, no dependencies, no test runner. Plain JS, loaded unpacked.
@@ -47,7 +48,15 @@ Note it cannot run twice in one page (top-level `const` redeclaration), so reloa
 
 `tools/dev-inject.js` also stubs `chrome.storage.local` and `chrome.runtime.sendMessage`, capturing
 writes on `window.__tahLocal` / `window.__tahSync`, so the whole invoice flow can be exercised on
-the live calendar page without installing anything (it only issues GETs).
+the live calendar page without installing anything (it only issues GETs). The feed stub answers
+`window.__tahIcalTexts[url]` (falling back to `window.__tahIcalText`), so several calendars can be
+faked at once; set `window.__tahLocal.icalFeeds` before injecting.
+
+The block view and the calendar overlay need no login either: serve the repo root
+(`python3 -m http.server 8817`), open `tools/grid-harness.html`, seed `window.__tahLocal` /
+`window.__tahIcalTexts`, then run `tools/dev-inject.js`. The stand-in grid is the same 288 × 7
+markup, so `readGrid()`, the block view, the chips and the tooltips all run for real. Use it for
+layout and calendar changes; writes and the site's own response parsing still need the live page.
 
 The statistics view needs no login at all: `tools/stats-harness.html` (served from the repo root,
 `python3 -m http.server 8817`) runs the real `stats.js` and `stats.css` against mock bookings and a
@@ -115,45 +124,74 @@ popup). Do not reintroduce `#tah-duration` / `#tah-start` lookups in the view co
 
 ## Calendar feed
 
-The guide's own calendar (a personal `.ics` URL) is overlaid on the block view; the extension only
-ever reads it. Three pieces:
+The guide's own calendars (personal `.ics` URLs, several of them) are overlaid on the block view;
+the extension only ever reads them. Three pieces:
 
-- `content/ical.js` parses the feed: dependency-free RFC 5545 subset — unfolding, `VEVENT`,
+- `content/ical.js` parses a feed: dependency-free RFC 5545 subset — unfolding, `VEVENT`,
   `DTSTART`/`DTEND`/`DURATION`, `VALUE=DATE`, `TZID`/`Z`, `EXDATE`, `RECURRENCE-ID` overrides, and
   `RRULE` with FREQ/INTERVAL/BYDAY/COUNT/UNTIL. `VTIMEZONE` is ignored because `Intl.DateTimeFormat`
   gives the offset for any IANA zone; occurrences are generated in the feed's *wall clock* and
   converted per instance, which is what keeps a 10:00 tour at 10:00 across a DST change. BYSETPOS
   and BYMONTHDAY are not implemented. `TAH_ICAL.eventsByDay(text, dayKeys)` returns
   `{ 'YYYY-MM-DD': [{ start, end, allDay, title }] }` — minutes from local midnight, multi-day timed
-  events clipped per day, all-day entries spanning 0–1440.
-- `background.js` fetches it (`tah-fetch-ical`). That hop is not optional: a content-script `fetch`
-  is a cross-origin request from `hsh.gomus.de` and dies on CORS, while a service-worker fetch with
-  a host permission does not. The origin is granted at runtime from the options page
-  (`chrome.permissions.request` + `optional_host_permissions` in the manifest) because the URL is
-  user-supplied — and the request must be the first thing the click handler does, since an `await`
-  before it can consume the user gesture.
-- `content.js` caches the text in `chrome.storage.local.icalCache` (15 min TTL) and renders.
+  events clipped per day, all-day entries spanning 0–1440. It knows nothing about *which* feed a
+  text came from; merging is `content.js`'s job.
+- `background.js` fetches one address (`tah-fetch-ical`). That hop is not optional: a content-script
+  `fetch` is a cross-origin request from `hsh.gomus.de` and dies on CORS, while a service-worker
+  fetch with a host permission does not. The origins are granted at runtime from the options page
+  (`chrome.permissions.request` + `optional_host_permissions` in the manifest) because the URLs are
+  user-supplied — all feeds go into **one** request call, which must be the first thing the click
+  handler does, since an `await` before it can consume the user gesture.
+- `content.js` caches each text in `chrome.storage.local.icalCache`, a map keyed by address
+  (15 min TTL per feed), and renders.
 
 Providers hand the same feed out under three schemes: `https://` (Google and most), `webcal://`
 (Apple) and `webdav://` / `webdavs://` (WebDAV servers, e.g. Nextcloud, mailbox.org). The stored
-`icalUrl` keeps whatever was pasted; the scheme is rewritten to `http(s)://` only at fetch time
+address keeps whatever was pasted; the scheme is rewritten to `http(s)://` only at fetch time
 (`feedCandidates()` in `background.js`). `webcal://` and `webdavs://` mean TLS; plain `webdav://` is
 ambiguous (davfs2 means HTTP, calendar apps mean TLS), so it is tried over `https` first and `http`
 second, and `originPatterns()` in `options.js` requests both origins so the second attempt is not
-killed by a missing permission. Do not "clean up" the URL on save: rewriting it in storage would
-break the user's link for other clients and change the `icalCache` key.
+killed by a missing permission. Do not "clean up" a URL on save: rewriting it in storage would break
+the user's link for other clients and change the `icalCache` key.
 
-The URL is a secret (anyone holding it reads the calendar), so it sits in `chrome.storage.local`
-next to that cache, never in sync. Changes to `icalUrl` / `icalOn` arrive through `storage.onChanged`
-and re-render.
+Storage shape — `chrome.storage.local`, never sync:
+
+- `icalFeeds`: `[{ id, url, label, color, on }]`. `label` empty means "use the server name"
+  (`feedTitle()`), `color` empty means "take the palette colour by position" (`FEED_COLORS`, mirrored
+  in `options.js`), `on` is the per-calendar switch. `readFeedList()` still falls back to the old
+  single `icalUrl` key, and `options.js` deletes that key once the list is saved; keep both paths
+  until no installed copy can be that old.
+- `icalCache`: `{ [url]: { text, fetchedAt } }`, with `cacheMap()` upgrading the old single-entry
+  shape. It is written **once per load** by `saveCalendarCache()` — a write per feed would have each
+  parallel fetch save the map as it looked before the others answered and drop their entries. The
+  same call prunes addresses that are no longer configured, because every feed's text counts against
+  the shared 10 MB local quota. Calendars that are merely switched off keep their copy.
+- `icalOn`: the master switch. Off means no bar and no overlay at all.
+
+Fetching is `Promise.all` over the enabled feeds, each in its own `try`/`catch` (`loadFeed`), then
+`mergeCalendarDays()` concatenates the day maps, sorts each day by start, and stamps `feed` (the
+title) and `color` onto every entry. A feed's name only appears in tooltips while more than one
+calendar is enabled — with a single feed it is noise. A failing feed keeps its last good text and is
+marked with `error` (stale text, `(Stand HH:MM)` in the chip's tooltip); one dead calendar must never
+blank the others, which is what the old single-feed code did.
+
+Changes to `icalFeeds` / `icalOn` arrive through `storage.onChanged` and go through
+`loadCalendarSettings()` (which keeps a feed's already-fetched days, but only while its URL is
+unchanged) and `loadCalendar(false)` — not a forced reload, the cache answers for the feeds that did
+not change.
 
 Rendering is deliberately minimal — **no event text in the grid**. A block that overlaps a timed
-event gets `tah-block-conflict` (red inset stripe) and the event's time and title in the cell's
-`title`; the day header carries the whole day's list in its own `title`. All-day entries never
+event gets `tah-block-conflict`, an inset stripe in that feed's colour (`--tah-feed`, set on the
+cell; the earliest clash wins, the tooltip names them all), and the event's time and title in the
+cell's `title`; the day header carries the whole day's list in its own `title`. All-day entries never
 stripe, because one "Urlaub" would mark the entire week, so the header tooltip is the only place
-they appear. The single visible extra is `tah-cal-bar` above the table (count, refresh, and the
-error with a retry button), which is how a broken feed announces itself instead of silently showing
-an empty week.
+they appear. The visible extra is `tah-cal-bar` above the table: one `tah-cal-chip` per calendar
+(dot in the feed colour, `aria-pressed`, dashed and hollow when hidden) which toggles that feed and
+writes the choice back to `icalFeeds`, then the week's count, then the error — either the message
+itself (one feed) or "N Kalender nicht erreichbar" with the details in the `title` — and the
+**Aktualisieren** / **Erneut** link. The chips are inside `#tah-block-view`, so a re-render
+(`refreshBlockView()`) replaces them; toggling only re-merges, it never refetches.
+
 
 ## Invoices
 
