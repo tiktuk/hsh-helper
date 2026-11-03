@@ -170,9 +170,15 @@ Where the address comes from:
 
 - **Google Calendar:** Settings → the calendar → **Integrate calendar** → *Secret
   address in iCal format*.
-- **Apple/iCloud:** share the calendar publicly, copy the `webcal://` link and
-  change `webcal://` to `https://`.
+- **Apple/iCloud:** share the calendar publicly and copy the `webcal://` link —
+  paste it as it is.
 - **Outlook:** Settings → Calendar → Shared calendars → **Publish a calendar**.
+- **WebDAV/CalDAV servers** (Nextcloud, mailbox.org, …) often hand out a
+  `webdav://` or `webdavs://` link; those work as they are too.
+
+`https://`, `webcal://` and `webdav://` are all accepted. The address is stored
+exactly as pasted and only rewritten to `http(s)://` when it is fetched — a
+`webdav://` link is tried over TLS first and over plain HTTP if that fails.
 
 The address is a secret — anyone who has it can read the calendar. It stays in
 this browser (local storage, not synced) and is only used to load the events.

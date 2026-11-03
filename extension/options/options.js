@@ -130,26 +130,42 @@ async function load() {
 
 // The feed URL is user-supplied, so the host permission is requested at runtime
 // for exactly that origin (manifest: optional_host_permissions).
-function originPattern(url) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
+// The scheme mapping mirrors feedCandidates() in background.js: the permission
+// has to cover the address the worker will really request, not the one typed.
+// webdav:// may be served over either scheme, so both are requested.
+function originPatterns(url) {
+  const text = String(url || '').trim();
+  const match = /^([a-z][a-z0-9+.-]*):/i.exec(text);
+  const scheme = match ? match[1].toLowerCase() : '';
+  const rest = match ? text.slice(match[0].length) : '';
+  let candidates;
+  if (scheme === 'http' || scheme === 'https') candidates = [text];
+  else if (scheme === 'webcal' || scheme === 'webdavs') candidates = [`https:${rest}`];
+  else if (scheme === 'webdav') candidates = [`https:${rest}`, `http:${rest}`];
+  else return [];
+
+  const patterns = [];
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      const pattern = `${parsed.protocol}//${parsed.hostname}/*`;
+      if (!patterns.includes(pattern)) patterns.push(pattern);
+    } catch {
+      // not a usable address; the caller reports that
+    }
   }
-  if (!/^https?:$/.test(parsed.protocol)) return null;
-  return `${parsed.protocol}//${parsed.hostname}/*`;
+  return patterns;
 }
 
 // Must be called synchronously from a click handler: chrome.permissions.request
 // only works inside a user gesture, and an await before it can consume that.
 async function ensureOrigin(url) {
-  const origin = originPattern(url);
-  if (!origin) throw new Error('Bitte eine vollständige http(s)-Adresse eintragen.');
-  if (!chrome.permissions?.request) return origin;
-  const granted = await chrome.permissions.request({ origins: [origin] });
-  if (!granted) throw new Error(`Ohne Erlaubnis für ${origin} lässt sich der Kalender nicht laden.`);
-  return origin;
+  const origins = originPatterns(url);
+  if (!origins.length) throw new Error('Bitte eine vollständige Adresse eintragen (https://, webcal:// oder webdav://).');
+  if (!chrome.permissions?.request) return origins;
+  const granted = await chrome.permissions.request({ origins });
+  if (!granted) throw new Error(`Ohne Erlaubnis für ${origins.join(' / ')} lässt sich der Kalender nicht laden.`);
+  return origins;
 }
 
 function nextSevenDays() {

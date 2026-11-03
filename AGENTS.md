@@ -134,6 +134,15 @@ ever reads it. Three pieces:
   before it can consume the user gesture.
 - `content.js` caches the text in `chrome.storage.local.icalCache` (15 min TTL) and renders.
 
+Providers hand the same feed out under three schemes: `https://` (Google and most), `webcal://`
+(Apple) and `webdav://` / `webdavs://` (WebDAV servers, e.g. Nextcloud, mailbox.org). The stored
+`icalUrl` keeps whatever was pasted; the scheme is rewritten to `http(s)://` only at fetch time
+(`feedCandidates()` in `background.js`). `webcal://` and `webdavs://` mean TLS; plain `webdav://` is
+ambiguous (davfs2 means HTTP, calendar apps mean TLS), so it is tried over `https` first and `http`
+second, and `originPatterns()` in `options.js` requests both origins so the second attempt is not
+killed by a missing permission. Do not "clean up" the URL on save: rewriting it in storage would
+break the user's link for other clients and change the `icalCache` key.
+
 The URL is a secret (anyone holding it reads the calendar), so it sits in `chrome.storage.local`
 next to that cache, never in sync. Changes to `icalUrl` / `icalOn` arrive through `storage.onChanged`
 and re-render.
