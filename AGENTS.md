@@ -13,8 +13,9 @@ this file is for working on it.
 - `extension/content/stats.js` – the statistics tab (see Statistics). Loaded after `content.js`, exposes one global `TAH_STATS` and takes its page helpers from `window.TAH_PAGE`.
 - `extension/content/stats.css` – the stats view and the sidebar entry.
 - `extension/vendor/chart.umd.min.js` – Chart.js 4.4.7 UMD, vendored unchanged (see Statistics).
+- `extension/assets/bike.jpg` – the guide's cargo e-bike, shown in the statistics card (see Statistics).
 - `extension/popup/` – settings (block length, preset times, working-hours window); links to the settings page.
-- `extension/options/` – invoice letterhead (sender, recipient, Steuernummer, bank, texts, signature, number range) and the iCal feed address.
+- `extension/options/` – invoice letterhead (sender, recipient, Steuernummer, bank, texts, signature, number range), the iCal feed address, the statistics assumptions and the bike photo.
 - `extension/background.js` – service worker; opens the invoice tab (`chrome.tabs.create`) and fetches the calendar feed (see Calendar feed).
 - `extension/invoice/` – the printable invoice page (`chrome-extension://` URL): rows from `chrome.storage.local`, letter from the settings.
 - `tools/dev-inject.js` – loads the content script into an already-open page (see Verification).
@@ -269,18 +270,33 @@ once the day is spent at the museum, not just during the tour. A workday is one
 date with at least one billable tour; it runs from the first start to the last
 end, so a split shift is paid per tour but spent per day. `commuteKm` is one way
 and ridden twice per workday at `commuteSpeed` (the guide stays on site between
-two tours); `prepMinutes` is added once per workday. The four assumptions
-(`commuteKm`, `commuteSpeed`, `prepMinutes`, `gapLimit`) are edited in the
-**Arbeitsweg & Pausen** card in the view and live in `chrome.storage.sync`. The
-view is their only consumer, so this is their one place — do not mirror them in
-the popup. The effective rate is `income / (span + commute + prep)`; the paid
-rate is `income / tour minutes`, and `lost` prices the pauses at the paid rate.
-A day is *efficient* when its pause is at most `gapLimit` minutes, *medium* up to
-twice that, *long* beyond; the doughnut in the workload card draws the same three
-bands, and the workload chart stacks work, pause and commute per bucket.
-`buildStats` keeps the raw `bookings` so `recompute()` can redraw after an
-assumption change without refetching detail pages. `tools/stats-harness.html`
-stubs `sync` as well as `local`, otherwise the card would show defaults only.
+two tours); `prepMinutes` is added once per workday. The six assumptions
+(`commuteKm`, `commuteSpeed`, `prepMinutes`, `gapLimit`, `bikeWhPerKm`,
+`electricityPrice`) live in `chrome.storage.sync` and are edited on the **options
+page**, not in the view: the view only prints them under the bike photo, and
+`chrome.storage.onChanged` reloads them while it is open. The effective rate is
+`income / (span + commute + prep)`; the paid rate is `income / tour minutes`, and
+`lost` prices the pauses at the paid rate. Electricity is
+`kmTotal × bikeWhPerKm / 1000` kWh at `electricityPrice`, i.e. at the socket,
+including charging losses, not the battery's nominal capacity. A day is
+*efficient* when its pause is at most `gapLimit` minutes, *medium* up to twice
+that, *long* beyond; the KPI grid reports the counts — eight equal cards, four
+per row, because a three-card row over a four-card row reads as two tables — and
+the workload chart stacks work, pause and commute per bucket. The **bike card** in the right column
+of that block holds the photo, the period's kilometres and kWh/€ under it, and
+the assumptions it was calculated from. It is read-only: the settings have one
+place, the options page, and the view must not grow a second one.
+`buildStats` keeps the raw `bookings` so `recompute()` can redraw after a
+settings change without refetching detail pages.
+
+The bike photo is `assets/bike.jpg`, bundled and listed in
+`web_accessible_resources` because the page loads it through an `<img>` in the
+content script's DOM. A custom photo is `chrome.storage.local.bikePhoto` (data
+URL, 800 px wide JPEG, written by the options page like the invoice signature);
+the view falls back to the bundled file when it is missing or broken. It is only
+displayed in the dashboard card, never uploaded anywhere. `tools/stats-harness.html`
+stubs `sync`, `local` and `runtime.getURL`, otherwise the card would show
+defaults and no bike.
 
 Chart.js is **vendored** in `vendor/` and loaded as a content script on every
 guide page (~206 KB, ~10 ms). That is the one deliberate exception to

@@ -19,7 +19,16 @@ const DEFAULTS = {
   closing: 'Diese Rechnung ist auch ohne Unterschrift gültig.\nMit freundlichen Grüßen',
   invoiceStart: 1,
   invoicePrefix: '',
+  commuteKm: 10,
+  commuteSpeed: 15,
+  prepMinutes: 0,
+  gapLimit: 45,
+  bikeWhPerKm: 15,
+  electricityPrice: 0.35,
 };
+
+// Numeric fields need a floor; everything else is free text.
+const MINIMUM = { invoiceStart: 1, commuteSpeed: 1, gapLimit: 1 };
 
 const FIELDS = [
   'senderName',
@@ -38,12 +47,22 @@ const FIELDS = [
   'closing',
   'invoiceStart',
   'invoicePrefix',
+  'commuteKm',
+  'commuteSpeed',
+  'prepMinutes',
+  'gapLimit',
+  'bikeWhPerKm',
+  'electricityPrice',
 ];
 
 const inputs = Object.fromEntries(FIELDS.map((id) => [id, document.querySelector(`#${id}`)]));
 const signatureInput = document.querySelector('#signatureFile');
 const signaturePreview = document.querySelector('#signaturePreview');
 const signatureRemove = document.querySelector('#signatureRemove');
+const bikePreview = document.querySelector('#bikePhotoPreview');
+const bikeInput = document.querySelector('#bikePhotoFile');
+const bikeReset = document.querySelector('#bikePhotoReset');
+const BIKE_DEFAULT = '../assets/bike.jpg';
 const saved = document.querySelector('#saved');
 const icalUrlInput = document.querySelector('#icalUrl');
 const icalOnInput = document.querySelector('#icalOn');
@@ -63,9 +82,15 @@ function showSignature(src) {
   else signaturePreview.removeAttribute('src');
 }
 
-// A signature scan is far bigger than it needs to be on paper; 800 px wide is
-// plenty and keeps it out of the storage quota's way.
-function shrinkToDataUrl(file) {
+function showBikePhoto(src) {
+  bikePreview.src = src || BIKE_DEFAULT;
+  bikeReset.hidden = !src;
+}
+
+// A signature scan (and a phone photo of the bike) is far bigger than it needs
+// to be on screen; 800 px wide is plenty and keeps it out of the storage
+// quota's way.
+function shrinkToDataUrl(file, { type = 'image/png', quality } = {}) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden.'));
@@ -78,7 +103,7 @@ function shrinkToDataUrl(file) {
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/png'));
+        resolve(canvas.toDataURL(type, quality));
       };
       img.src = reader.result;
     };
@@ -90,10 +115,11 @@ async function load() {
   const stored = await chrome.storage.sync.get(DEFAULTS);
   for (const id of FIELDS) {
     const value = stored[id] ?? DEFAULTS[id];
-    inputs[id].value = id === 'invoiceStart' ? String(value) : value;
+    inputs[id].value = String(value);
   }
-  const { signature = '' } = await chrome.storage.local.get({ signature: '' });
+  const { signature = '', bikePhoto = '' } = await chrome.storage.local.get({ signature: '', bikePhoto: '' });
   showSignature(signature);
+  showBikePhoto(bikePhoto);
 
   const { icalUrl = '', icalOn = true } = await chrome.storage.local.get({ icalUrl: '', icalOn: true });
   icalUrlInput.value = icalUrl;
@@ -167,7 +193,11 @@ async function save() {
   const values = {};
   for (const id of FIELDS) {
     const input = inputs[id];
-    values[id] = id === 'invoiceStart' ? Math.max(1, Number(input.value) || DEFAULTS.invoiceStart) : input.value.trim();
+    if (typeof DEFAULTS[id] === 'number') {
+      values[id] = Math.max(MINIMUM[id] ?? 0, Number(input.value) || 0);
+    } else {
+      values[id] = input.value.trim();
+    }
   }
   await chrome.storage.sync.set(values);
 
@@ -208,6 +238,27 @@ signatureRemove.addEventListener('click', async () => {
   await chrome.storage.local.remove('signature');
   showSignature('');
   flash('Unterschrift entfernt.');
+});
+
+bikeInput.addEventListener('change', async () => {
+  const file = bikeInput.files?.[0];
+  if (!file) return;
+  try {
+    const dataUrl = await shrinkToDataUrl(file, { type: 'image/jpeg', quality: 0.82 });
+    await chrome.storage.local.set({ bikePhoto: dataUrl });
+    showBikePhoto(dataUrl);
+    flash('Foto gespeichert.');
+  } catch (err) {
+    flash(`Fehler: ${err.message}`);
+  } finally {
+    bikeInput.value = '';
+  }
+});
+
+bikeReset.addEventListener('click', async () => {
+  await chrome.storage.local.remove('bikePhoto');
+  showBikePhoto('');
+  flash('Standardbild wiederhergestellt.');
 });
 
 load();

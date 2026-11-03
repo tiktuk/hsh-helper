@@ -131,6 +131,11 @@ h2 {
   background: #fff;
 }
 
+.bike img {
+  max-width: 280px;
+  max-height: 140px;
+}
+
 .signature-actions {
   display: flex;
   flex-direction: column;

@@ -99,6 +99,7 @@
       window.__local = {};
       window.__sync = {};
       window.chrome = {
+        runtime: { getURL: (path) => `../extension/${path}` },
         storage: {
           local: {
             get: async (defaults) => ({ ...(defaults || {}), ...window.__local }),

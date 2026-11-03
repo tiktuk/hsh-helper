@@ -7,7 +7,7 @@
   </head>
   <body>
     <h1>Einstellungen</h1>
-    <p class="sub">Briefkopf, Texte und Unterschrift für die Monatsrechnung, dazu der eigene Kalender für die Wochenansicht. Leere Felder erscheinen nicht auf der Rechnung.</p>
+    <p class="sub">Briefkopf, Texte und Unterschrift für die Monatsrechnung, der eigene Kalender für die Wochenansicht und die Annahmen der Statistik. Leere Felder erscheinen nicht auf der Rechnung.</p>
 
     <section>
       <h2>Rechnungssteller</h2>
@@ -134,6 +134,49 @@
         synchronisiert) und wird nur zum Laden der Termine verwendet. Beim ersten Speichern fragt Chrome nach der
         Erlaubnis für genau diesen Server.
       </p>
+    </section>
+
+    <section>
+      <h2>Arbeitsweg &amp; Statistik</h2>
+      <div class="grid">
+        <label class="field">
+          <span>Anfahrt (km, einfach)</span>
+          <input id="commuteKm" type="number" min="0" step="0.5" />
+        </label>
+        <label class="field">
+          <span>Radtempo (km/h)</span>
+          <input id="commuteSpeed" type="number" min="1" step="1" />
+        </label>
+        <label class="field">
+          <span>Rüstzeit je Tag (min)</span>
+          <input id="prepMinutes" type="number" min="0" step="5" />
+        </label>
+        <label class="field">
+          <span>Pause bis (min) gilt als effizient</span>
+          <input id="gapLimit" type="number" min="1" step="5" />
+        </label>
+        <label class="field">
+          <span>Verbrauch (Wh/km)</span>
+          <input id="bikeWhPerKm" type="number" min="0" step="1" />
+        </label>
+        <label class="field">
+          <span>Strompreis (€/kWh)</span>
+          <input id="electricityPrice" type="number" min="0" step="0.01" />
+        </label>
+      </div>
+      <p class="hint">
+        Die Anfahrt zählt zweimal je Arbeitstag, die Pause zwischen zwei Einsätzen als Anwesenheit. Der Verbrauch ist
+        die Energie an der Steckdose, inklusive Ladeverlusten.
+      </p>
+
+      <div class="signature bike">
+        <img id="bikePhotoPreview" src="../assets/bike.jpg" alt="Dienstrad" />
+        <div class="signature-actions">
+          <input id="bikePhotoFile" type="file" accept="image/*" />
+          <button id="bikePhotoReset" class="secondary" type="button" hidden>Standardbild</button>
+        </div>
+      </div>
+      <p class="hint">Foto des Dienstrads für die Statistik. Wird auf 800 px Breite verkleinert und nur lokal gespeichert.</p>
     </section>
 
     <div class="actions">

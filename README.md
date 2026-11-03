@@ -152,14 +152,15 @@ that off again.
 
 The toolbar icon opens the settings: block length, the list of quick start
 times, whether Alt+Klick is active, the visible working-hours range, and the
-sidebar labels. From there, **Rechnung & Kalender …** opens the settings page
-for the invoice and for the calendar feed described below.
+sidebar labels. From there, **Einstellungen …** opens the settings page for the
+invoice, the calendar feed described below and the assumptions behind the
+statistics.
 
 ## Kalender
 
 Your own calendar can show up in the week view, so you can book availability
 around your appointments instead of keeping them in your head. Paste the secret
-**iCal address** of your calendar into the settings (**Rechnung & Kalender …** →
+**iCal address** of your calendar into the settings (**Einstellungen …** →
 *Kalender (iCal)*). Blocks that collide with an appointment then get a red stripe
 on the left; the appointment's time and title are in the tooltip of that cell,
 and the day header's tooltip lists everything on that day — which is also where
@@ -240,19 +241,19 @@ one period back or forward. Below that:
 - **Teilnehmende, Absagen, Einsätze pro Woche, Absagequote** — the smaller row.
 - **Prognose zum 31.12.** (year view) — what the year will most likely end at,
   with a range and how much of it is already booked.
-- **Effektiver Stundensatz, Wartezeit, Radkilometer, Effizienz** — what an hour
-  really pays once the pause between two tours and the ride to the museum are
-  counted, not just the tour time.
+- **Effektiver Stundensatz, Wartezeit, Ø Pause je Arbeitstag, Effizienz** — what
+  an hour really pays once the pause between two tours and the ride to the
+  museum are counted, not just the tour time.
 - **Effiziente Tage, Tage mit Pause, längste Pause, Tage mit 2+ Einsätzen** — how
   often a day is one trip instead of a split shift, and what the waiting costs.
+- **The bike card** — the photo, this period's kilometres and electricity (kWh
+  and €) under it, and the assumptions they were calculated from.
 - **Einnahmen je Tag / je Monat** — bars split into Honorar and
   Ausfallhonorar.
 - **Zeitaufwand je Tag / je Monat** — the same days as hours, split into work,
   waiting between tours and the ride.
 - **Prognose bis Jahresende** — cumulative income so far, the projection, and
   the range it sits in.
-- **Arbeitstage nach Pausenlänge** — the share of days without a pause, with a
-  short pause and with a long one.
 - **Einsätze nach Wochentag**, **Angebote nach Einsätzen**, **Startzeiten** —
   where the work actually is.
 - **Auffälligkeiten** — the strongest weekday, the busiest start time, the best
@@ -262,17 +263,21 @@ Only bookings with an amount count: a cancellation by the group brings its
 Ausfallhonorar and stays in, while a cancellation by the guide or a booking you
 were moved off has no amount and is left out (the footer says how many).
 
-**Arbeitsweg und Pausen.** The *Arbeitsweg & Pausen* card holds the assumptions
-behind the commute figures: the distance to the museum (one way, 10 km
-by default), the bike speed, a preparation time per workday and the pause length
-that still counts as efficient (45 minutes by default). The ride is counted
-twice per workday, and a pause between two tours counts as time at the museum,
-not as free time — that is exactly what the effective hourly rate is for. A day
-runs from the first tour to the last, so two tours with three hours in between
-are one long day, not two short ones. A day without a pause over the limit counts
-as efficient, including a day with only one tour. The values are saved in
-Chrome's sync storage, so they follow the profile; changing one recomputes the
-figures immediately, without reloading the bookings.
+**Arbeitsweg und Pausen.** The assumptions behind the commute figures live in
+the extension settings (toolbar icon → **Einstellungen …**, or the
+**Einstellungen** button on the card): the distance to the museum (one way, 10 km
+by default), the bike speed, a preparation time per workday, the pause length
+that still counts as efficient (45 minutes), the bike's consumption in Wh/km and
+the electricity price. The ride is counted twice per workday, and a pause between
+two tours counts as time at the museum, not as free time — that is exactly what
+the effective hourly rate is for. A day runs from the first tour to the last, so
+two tours with three hours in between are one long day, not two short ones. A
+day without a pause over the limit counts as efficient, including a day with only
+one tour. Electricity is the distance times the consumption at the socket
+(including charging losses) at your tariff. The card in the dashboard shows the
+bike, this period's kilometres and electricity under it, and the values the
+figures were calculated from; changing a setting updates an open view
+immediately. The bike photo can be replaced in the settings too.
 
 **How the forecast works.** The year is cut into weeks. Every week that is
 already over contributes its income; the median of those weeks is what a typical

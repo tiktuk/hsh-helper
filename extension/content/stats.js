@@ -39,7 +39,15 @@ var TAH_STATS = (function () {
     commuteSpeed: 15,
     prepMinutes: 0,
     gapLimit: 45,
+    bikeWhPerKm: 15,
+    electricityPrice: 0.35,
   };
+
+  // The bike is a cargo e-bike. The photo is replaceable in the settings: a
+  // bundled default, overridden by a data URL in local storage (like the
+  // invoice signature, and for the same reason — too big for the 8 KB sync
+  // quota). The view only ever reads it.
+  const BIKE_DEFAULT = 'assets/bike.jpg';
 
   const view = {
     period: 'month',
@@ -50,6 +58,7 @@ var TAH_STATS = (function () {
     error: '',
     data: null,
     commute: { ...COMMUTE_DEFAULTS },
+    bikePhoto: '',
     charts: {},
     hiddenActive: [],
     observer: null,
@@ -281,6 +290,8 @@ var TAH_STATS = (function () {
     const speed = Math.max(1, Number(settings.commuteSpeed) || 1);
     const prep = Math.max(0, Math.round(Number(settings.prepMinutes) || 0));
     const limit = Math.max(1, Math.round(Number(settings.gapLimit) || 1));
+    const whPerKm = Math.max(0, Number(settings.bikeWhPerKm) || 0);
+    const powerPrice = Math.max(0, Number(settings.electricityPrice) || 0);
     const commute = km > 0 ? Math.round(((2 * km) / speed) * 60) : 0;
 
     const byDate = new Map();
@@ -331,17 +342,20 @@ var TAH_STATS = (function () {
     const multi = days.filter((day) => day.rows.length > 1);
     const count = (band) => days.filter((day) => day.band === band).length;
     const paidRate = work ? income / (work / 60) : 0;
+    const kmTotal = days.length * 2 * km;
+    // Charging losses are part of the wall-plug energy, so the figure is
+    // "Wh per kilometre at the socket" and the price is the household tariff.
+    const kwh = (kmTotal * whPerKm) / 1000;
 
     return {
       days,
       limit,
       km,
-      work,
       gap,
-      away,
-      income,
       commuteTotal: days.length * commute,
-      kmTotal: days.length * 2 * km,
+      kmTotal,
+      kwh,
+      powerCost: kwh * powerPrice,
       paidRate,
       effectiveRate: away ? income / (away / 60) : 0,
       efficiency: away ? Math.min(1, work / away) : 0,
@@ -831,60 +845,86 @@ var TAH_STATS = (function () {
 
   /* ---------- commute & pauses ---------- */
 
-  // The four assumptions are editable right where their effect is visible: the
-  // view is the only consumer, so this is their one place. They are written to
-  // sync storage, like the invoice's person data.
-  function numberField(key, label, { min = 0, step = 1 } = {}) {
-    const wrap = el('label', { class: 'tah-assume-field' });
-    wrap.append(el('span', { text: label }));
-    const input = el('input', {
-      type: 'number',
-      min: String(min),
-      step: String(step),
-      value: String(view.commute[key]),
-    });
-    input.addEventListener('change', () => {
-      const value = Math.max(min, Number(input.value) || 0);
-      input.value = String(value);
-      view.commute[key] = value;
-      try {
-        chrome.storage.sync.set({ [key]: value }).catch(() => {});
-      } catch {
-        /* no sync storage (the harness stubs it) */
-      }
-      recompute();
-    });
-    wrap.append(input);
-    return wrap;
+  // The assumptions live in the extension settings (options/options.html), not
+  // here: they describe the person and are changed once, not while reading the
+  // month. This card only shows the bike and what the figures assume, with a
+  // way to the settings.
+  function bikePhotoUrl() {
+    if (view.bikePhoto) return view.bikePhoto;
+    try {
+      return chrome.runtime.getURL(BIKE_DEFAULT);
+    } catch {
+      return '';
+    }
   }
 
-  function assumptionsCard() {
-    const box = el('div', { class: 'tah-assume' });
-    const head = el('div', { class: 'tah-assume-head' });
-    head.append(el('h3', { text: 'Arbeitsweg & Pausen' }));
-    head.append(
-      el('span', {
-        class: 'tah-assume-hint',
-        text: 'Hin- und Rückfahrt je Arbeitstag; die Pause zwischen zwei Einsätzen ist Anwesenheit, keine Freizeit.',
+  function decimal(value, digits) {
+    return Number(value || 0).toLocaleString('de-DE', { maximumFractionDigits: digits });
+  }
+
+  function bikeStat(value, note) {
+    const row = el('div', { class: 'tah-bike-stat' });
+    row.append(el('strong', { text: value }), el('span', { text: note }));
+    return row;
+  }
+
+  // The bike and what it did for this period, with the assumptions it was
+  // calculated from underneath. The assumptions themselves are edited in the
+  // extension settings, not here.
+  function bikeCard(wl) {
+    const box = el('aside', { class: 'tah-bike' });
+    const img = el('img', { class: 'tah-bike-photo', alt: 'Dienstrad', src: bikePhotoUrl() });
+    img.addEventListener('error', () => {
+      let fallback = '';
+      try {
+        fallback = chrome.runtime.getURL(BIKE_DEFAULT);
+      } catch {
+        /* no runtime */
+      }
+      if (fallback && img.src !== fallback) img.src = fallback;
+    });
+    box.append(img);
+
+    if (wl.km) {
+      box.append(
+        bikeStat(
+          `${wl.kmTotal.toLocaleString('de-DE', { maximumFractionDigits: 0 })} km`,
+          `${hours(wl.commuteTotal)} Fahrzeit · ${wl.days.length * 2} Fahrten`
+        ),
+        bikeStat(
+          `${wl.kwh.toLocaleString('de-DE', { maximumFractionDigits: 1 })} kWh`,
+          `${T.formatMoney(wl.powerCost)} Strom`
+        )
+      );
+    } else {
+      box.append(el('p', { class: 'tah-bike-assume', text: 'Keine Anfahrt eingetragen.' }));
+    }
+
+    const c = view.commute;
+    box.append(
+      el('p', {
+        class: 'tah-bike-assume',
+        text: [
+          `${decimal(c.commuteKm, 1)} km einfach`,
+          `${decimal(c.commuteSpeed, 0)} km/h`,
+          Number(c.prepMinutes) ? `${decimal(c.prepMinutes, 0)} min Rüstzeit` : '',
+          `Pause ≤ ${decimal(c.gapLimit, 0)} min`,
+          `${decimal(c.bikeWhPerKm, 1)} Wh/km`,
+          `${decimal(c.electricityPrice, 2)} €/kWh`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
       })
     );
-    box.append(head);
-
-    const fields = el('div', { class: 'tah-assume-fields' });
-    fields.append(
-      numberField('commuteKm', 'Anfahrt (km, einfach)', { step: 0.5 }),
-      numberField('commuteSpeed', 'Radtempo (km/h)', { min: 1 }),
-      numberField('prepMinutes', 'Rüstzeit je Tag (min)', { step: 5 }),
-      numberField('gapLimit', 'Pause bis (min) gilt als effizient', { min: 1, step: 5 })
-    );
-    box.append(fields);
     return box;
   }
 
   function workloadCard(wl) {
     const box = el('section', { class: 'tah-workload' });
-    box.append(assumptionsCard());
 
+    // One grid of equal cards, four to a row: two rows of four line up exactly,
+    // where a three-card row above a four-card row reads as two different
+    // tables.
     const kpis = el('div', { class: 'tah-kpis' });
     kpis.append(
       kpi(
@@ -894,15 +934,11 @@ var TAH_STATS = (function () {
       ),
       kpi(hours(wl.gap), 'Wartezeit', wl.gap ? `entspricht ${T.formatMoney(wl.lost)} Honorar` : 'keine Pausen'),
       kpi(
-        wl.km ? `${wl.kmTotal.toLocaleString('de-DE', { maximumFractionDigits: 0 })} km` : '–',
-        'Radkilometer',
-        wl.km ? `${hours(wl.commuteTotal)} Fahrzeit · ${wl.days.length * 2} Fahrten` : 'keine Anfahrt eingetragen'
+        wl.days.length ? hours(wl.gap / wl.days.length) : '–',
+        'Ø Pause je Arbeitstag',
+        `über ${wl.days.length} ${wl.days.length === 1 ? 'Arbeitstag' : 'Arbeitstage'}`
       ),
-      kpi(`${Math.round(wl.efficiency * 100)} %`, 'Effizienz', 'bezahlte Zeit von Tür zu Tür')
-    );
-
-    const small = el('div', { class: 'tah-kpis tah-kpis-small' });
-    small.append(
+      kpi(`${Math.round(wl.efficiency * 100)} %`, 'Effizienz', 'bezahlte Zeit von Tür zu Tür'),
       kpi(String(wl.efficient), 'Effiziente Tage', `von ${wl.days.length} · Pause ≤ ${wl.limit} min`),
       kpi(
         String(wl.medium + wl.long),
@@ -921,13 +957,10 @@ var TAH_STATS = (function () {
       )
     );
 
-    // The distribution sits next to its key figures instead of in the chart
-    // grid: the grid is laid out for three small charts and a fourth would be
-    // left alone in a row.
     const body = el('div', { class: 'tah-workload-body' });
     const figures = el('div', { class: 'tah-workload-kpis' });
-    figures.append(kpis, small);
-    body.append(figures, figure('tah-chart-efficiency', 'Arbeitstage nach Pausenlänge'));
+    figures.append(kpis);
+    body.append(figures, bikeCard(wl));
     box.append(body);
     return box;
   }
@@ -1109,6 +1142,11 @@ var TAH_STATS = (function () {
         );
       }
       if (wl.km) out.push(`Arbeitsweg: ${Math.round(wl.kmTotal)} km und ${hours(wl.commuteTotal)} Fahrzeit bei ${wl.km} km einfacher Strecke`);
+      if (wl.kwh) {
+        out.push(
+          `Strom für den Arbeitsweg: ${wl.kwh.toLocaleString('de-DE', { maximumFractionDigits: 1 })} kWh für ${T.formatMoney(wl.powerCost)} (${wl.whPerKm} Wh/km)`
+        );
+      }
       if (wl.effectiveRate) {
         out.push(
           `Effektiver Stundensatz ${T.formatMoney(wl.effectiveRate)}/h — ${T.formatMoney(wl.paidRate - wl.effectiveRate)}/h weniger als pro Tourstunde`
@@ -1418,48 +1456,38 @@ var TAH_STATS = (function () {
       },
     });
 
-    chart('tah-chart-efficiency', {
-      type: 'doughnut',
-      data: {
-        labels: [
-          `Effizient (≤ ${workload.limit} min)`,
-          `Mittlere Pause (≤ ${workload.limit * 2} min)`,
-          `Lange Pause (> ${workload.limit * 2} min)`,
-        ],
-        datasets: [
-          {
-            data: [workload.efficient, workload.medium, workload.long],
-            backgroundColor: ['#4caf50', '#f0a30a', '#b3261e'],
-            borderColor: '#fff',
-            borderWidth: 2,
-          },
-        ],
-      },
-      options: {
-        ...base,
-        cutout: '55%',
-        plugins: {
-          ...base.plugins,
-          legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.label}: ${ctx.parsed} ${ctx.parsed === 1 ? 'Tag' : 'Tage'}`,
-            },
-          },
-        },
-      },
-    });
   }
 
   /* ---------- loading ---------- */
 
-  async function loadCommute() {
+  async function loadStatsSettings() {
     try {
       const stored = await chrome.storage.sync.get(COMMUTE_DEFAULTS);
       view.commute = { ...COMMUTE_DEFAULTS, ...stored };
     } catch {
       view.commute = { ...COMMUTE_DEFAULTS };
     }
+    try {
+      const { bikePhoto = '' } = await chrome.storage.local.get({ bikePhoto: '' });
+      view.bikePhoto = bikePhoto;
+    } catch {
+      view.bikePhoto = '';
+    }
+  }
+
+  // The assumptions live in the options page now, possibly in another tab.
+  // Follow them while the view is open instead of asking for a reload.
+  function watchSettings() {
+    if (!chrome.storage?.onChanged) return;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (!view.open) return;
+      if (area === 'sync' && Object.keys(changes).some((key) => key in COMMUTE_DEFAULTS)) {
+        loadStatsSettings().then(recompute);
+      } else if (area === 'local' && changes.bikePhoto) {
+        view.bikePhoto = changes.bikePhoto.newValue || '';
+        render();
+      }
+    });
   }
 
   async function load({ force = false } = {}) {
@@ -1475,7 +1503,7 @@ var TAH_STATS = (function () {
 
     const range = rangeFor(view.period, view.anchor);
     try {
-      await loadCommute();
+      await loadStatsSettings();
       const result = await loadBookings(range, { force, token });
       if (token !== view.token || !result) return;
       view.loading = false;
@@ -1494,7 +1522,8 @@ var TAH_STATS = (function () {
   async function boot() {
     const stored = await chrome.storage.local.get({ statsPeriod: 'month' });
     if (PERIODS.some(([value]) => value === stored.statsPeriod)) view.period = stored.statsPeriod;
-    await loadCommute();
+    await loadStatsSettings();
+    watchSettings();
     installNav();
   }
 
