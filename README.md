@@ -125,6 +125,14 @@ grid itself:
   the weekend alone; off, they include Saturday and Sunday as well. The ✓/✗ in
   the day headers, Alt+Klick and plain clicks ignore it and act on exactly the
   day or cells you clicked.
+- **Ganze Woche verfügbar …** – fills every block of the week that is still
+  empty, in one go. A dialog asks the two things that decide the result: which
+  calendars to keep clear, and whether the weekend counts (off by default, like
+  the row buttons). It shows how many blocks it will set before anything is
+  written. Busy blocks (nicht verfügbar, or partially available) and blocks a
+  chosen calendar covers are left alone — all-day entries like "Urlaub" count as
+  covering the whole day — and so are past blocks and rows the
+  **nur 09:55–18:30** filter hides. The usual **Rückgängig** covers the lot.
 - **Alt+Klick** on a cell – mark the 90-minute block starting at that cell as
   verfügbar.
 - **Shift+Klick** on a cell – mark everything from the last plain-clicked cell
@@ -173,6 +181,8 @@ to hide that calendar, click again to bring it back. The choice is remembered, s
 a work calendar you only need on Mondays can stay hidden. Hiding a calendar costs
 nothing — its events are already loaded, so they come back instantly. The
 **zeigen** checkbox in the settings does the same thing from the other side.
+**Ganze Woche verfügbar** keeps those times free as well, and its dialog asks
+which of the calendars should be taken into account.
 
 Where the addresses come from:
 

@@ -106,6 +106,119 @@
   font-size: 11px;
 }
 
+/* The one action in the panel. Kept a real button (not a tah-link) because it
+   opens a dialog rather than applying something straight away. */
+#tah-panel .tah-actions {
+  margin-bottom: 6px;
+}
+
+#tah-panel .tah-btn,
+#tah-week-dialog .tah-btn {
+  padding: 3px 10px;
+  border: 1px solid #1e4b8c;
+  border-radius: 3px;
+  background: #1e4b8c;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#tah-panel .tah-btn:hover,
+#tah-week-dialog .tah-btn:hover {
+  filter: brightness(1.08);
+}
+
+#tah-panel .tah-btn:disabled,
+#tah-week-dialog .tah-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
+}
+
+#tah-week-dialog .tah-btn-quiet {
+  background: #fff;
+  color: #1e4b8c;
+  font-weight: 400;
+}
+
+/* Week-fill dialog: fixed to the viewport, so it stays put while the grid
+   behind it scrolls. The page's own modals sit at a lower z-index. */
+#tah-week-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(24, 32, 44, 0.38);
+  font-size: 12px;
+  color: #333;
+}
+
+#tah-week-dialog .tah-modal-box {
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 16px 18px;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+#tah-week-dialog h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: #1e4b8c;
+}
+
+#tah-week-dialog .tah-modal-sub {
+  margin: 0 0 12px;
+  color: #8b939c;
+  font-size: 11px;
+}
+
+#tah-week-dialog .tah-modal-feeds {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #e3e7ec;
+  border-radius: 3px;
+}
+
+#tah-week-dialog .tah-modal-feeds legend {
+  padding: 0 4px;
+  color: #777;
+  font-size: 11px;
+}
+
+#tah-week-dialog .tah-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+#tah-week-dialog .tah-check input {
+  margin: 0;
+  cursor: pointer;
+}
+
+#tah-week-dialog .tah-modal-summary {
+  min-height: 16px;
+  margin: 10px 0 0;
+  color: #555;
+}
+
+#tah-week-dialog .tah-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 /* Rows outside the working hours. !important beats the site's inline
    display values, so its collapse/expand toggles cannot bring them back. */
 .available-table tr.tah-row-hidden {

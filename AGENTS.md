@@ -116,11 +116,37 @@ grid model, writes, undo and Shift/Alt selection all keep working unchanged – 
 
 The panel (`buildPanel`) is deliberately thin: title, an `Ansicht` row, a `Filter` row with the
 `nur Mo–Fr (Zeilen ✓/✗)` and working-hours checkboxes (both left-aligned under the segmented
-control, not pushed to the edges), hint and status line. It has no start-time, duration or
-day-picker inputs — the block length and the row times are the settings
-(`chrome.storage.sync.duration` / `presets`), so there is exactly one place to change them (the
-popup). Do not reintroduce `#tah-duration` / `#tah-start` lookups in the view code; read
+control, not pushed to the edges), one `Woche` row with the week-fill button, hint and status line.
+It has no start-time, duration or day-picker inputs — the block length and the row times are the
+settings (`chrome.storage.sync.duration` / `presets`), so there is exactly one place to change them
+(the popup). Do not reintroduce `#tah-duration` / `#tah-start` lookups in the view code; read
 `state.settings` instead.
+
+**Ganze Woche verfügbar** (`openWeekFillDialog` → `weekFillPlan` → `applyToCells`) fills the empty
+blocks of the week. It is a planner plus the ordinary write path, not a new writer: it collects the
+cells, `applyToCells` does the toggling, progress, undo and status (with an optional fourth `note`
+argument for what a bulk action left alone — keep that note in the status line, the undo button has
+to stay next to the count). The rules the plan encodes:
+
+- Only `not_set` blocks are filled. `unavailable` **and** `mixed` blocks are skipped, so the busy
+  part of a partially available block survives; a whole-week fill must never clear a "nicht
+  verfügbar". `readOnly` blocks and blocks without cells count as skipped (past), like everywhere.
+- A block is skipped when any *selected* calendar has an entry overlapping it (`feedClash`), read
+  from each feed's own `days` map rather than the merged one — a calendar hidden from the view can
+  still be respected. All-day entries span 0–1440 and therefore block the whole day; that is
+  deliberately different from the stripes, which ignore them.
+- The weekend is included only when the dialog's checkbox is on, and it defaults to
+  `!weekdaysOnly`, i.e. off, matching the row buttons.
+- Rows hidden by the working-hours filter (`hideOutside`) are not filled either — same overlap test
+  as `applyRowVisibility`, so the fill never writes a row the user cannot see.
+- Adjacent preset rows share five-minute cells (13:55–15:25 and 14:55–16:25 overlap by half an
+  hour), so the plan dedupes by cell id; without that, `plan.blocks × 18` and the number of writes
+  disagree and cells are toggled twice.
+- The dialog is `#tah-week-dialog` on `document.body` (fixed, z-index 100, above the sticky panel),
+  with the calendars that have loaded, the weekend switch and a live count; **Verfügbar setzen** is
+  disabled when there is nothing to set. Escape and a backdrop click close it without writing, and
+  the plan is recomputed at click time, so what the summary promised is what gets written.
+
 
 ## Calendar feed
 

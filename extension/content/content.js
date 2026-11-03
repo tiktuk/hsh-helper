@@ -182,7 +182,7 @@ function setBusy(busy) {
   });
 }
 
-async function applyToCells(cells, target, label) {
+async function applyToCells(cells, target, label, note = '') {
   if (state.busy) return;
   const clickable = cells.filter((c) => c.classList.contains('clickable'));
   const skipped = cells.length - clickable.length;
@@ -217,8 +217,13 @@ async function applyToCells(cells, target, label) {
   setBusy(false);
   refreshBlockView();
 
+  // `note` says what a bulk action left alone, e.g. the busy blocks a week fill
+  // skipped. It is a tail on the status line, not a second one: the undo button
+  // has to stay next to the count.
+  const tail = `${skipped ? `, ${skipped} übersprungen` : ''}${note ? ` · ${note}` : ''}`;
+
   if (!changed.length) {
-    status(`${label}: bereits aktuell (${clickable.length} Slots).`);
+    status(`${label}: bereits aktuell (${clickable.length} Slots)${tail}.`);
     return;
   }
 
@@ -226,10 +231,10 @@ async function applyToCells(cells, target, label) {
   clearTimeout(state.undoTimeout);
   state.undoTimeout = setTimeout(() => {
     state.undo = null;
-    status(`${label}: ${changed.length} Slots geändert${skipped ? `, ${skipped} übersprungen` : ''}.`);
+    status(`${label}: ${changed.length} Slots geändert${tail}.`);
   }, 20000);
 
-  status(`${label}: ${changed.length} Slots geändert${skipped ? `, ${skipped} übersprungen` : ''}.`, { undo: true });
+  status(`${label}: ${changed.length} Slots geändert${tail}.`, { undo: true });
 }
 
 async function undoLast() {
@@ -383,6 +388,197 @@ function blockRows() {
 async function toggleBlock(cells, label, kind) {
   await applyToCells(cells, kind === 'available' ? 'not_set' : 'available', label);
   refreshBlockView();
+}
+
+/* ---------- whole week ---------- */
+
+// Whether any of the picked calendars has something in that block. All-day
+// entries count here, unlike the stripes in the grid: a holiday really is a
+// blocked day, and filling it would offer tours while the guide is away.
+function feedClash(dateKey, startMin, endMin, feedIds) {
+  for (const feed of state.calendar.feeds) {
+    if (!feedIds.has(feed.id)) continue;
+    const entries = (feed.days || {})[dateKey] || [];
+    if (entries.some((entry) => entry.start < endMin && entry.end > startMin)) return true;
+  }
+  return false;
+}
+
+// What "the whole week" would touch: every block that is still empty, minus the
+// ones that are already busy (unavailable or mixed) and the ones a picked
+// calendar covers. Past blocks are left alone as everywhere else, and rows the
+// working-hours filter hides are not filled either — a click the user cannot see
+// coming is worse than one more option.
+function weekFillPlan({ feeds, weekend }) {
+  const grid = readGrid();
+  const plan = { cells: [], blocks: 0, days: new Set(), available: 0, busy: 0, events: 0, past: 0 };
+  if (!grid) return plan;
+
+  const keys = columnKeys(grid);
+  const duration = state.settings.duration;
+  const from = parseTime(state.settings.dayFrom);
+  const to = parseTime(state.settings.dayTo);
+  const lo = from ? from.hh * 60 + from.mm : 0;
+  const hi = to ? to.hh * 60 + to.mm : 24 * 60;
+  // Adjacent rows share five-minute cells (13:55–15:25 and 14:55–16:25 overlap
+  // by half an hour), so a cell can be in two blocks. It is written once.
+  const seen = new Set();
+
+  for (const row of blockRows()) {
+    const start = parseTime(row.time);
+    if (!start) continue;
+    const startMin = start.hh * 60 + start.mm;
+    if (state.settings.hideOutside && (startMin >= hi || startMin + duration <= lo)) continue;
+
+    row.cells.forEach((cells, i) => {
+      const dateKey = keys[i];
+      if (!dateKey) return;
+      const day = weekdayOf(dateKey);
+      if (!weekend && (day === 0 || day === 6)) return;
+
+      const info = summarize(cells);
+      if (info.kind === 'available') {
+        plan.available += 1;
+        return;
+      }
+      if (!cells.length || info.readOnly) {
+        plan.past += 1;
+        return;
+      }
+      if (info.kind !== 'not_set') {
+        plan.busy += 1;
+        return;
+      }
+      if (feedClash(dateKey, startMin, startMin + duration, feeds)) {
+        plan.events += 1;
+        return;
+      }
+      plan.blocks += 1;
+      plan.days.add(dateKey);
+      for (const cell of cells) {
+        if (seen.has(cell.id)) continue;
+        seen.add(cell.id);
+        plan.cells.push(cell);
+      }
+    });
+  }
+  return plan;
+}
+
+function planNote(plan) {
+  const parts = [];
+  if (plan.busy) parts.push(`${plan.busy} belegt`);
+  if (plan.events) parts.push(`${plan.events} mit Termin`);
+  if (plan.past) parts.push(`${plan.past} vergangen`);
+  return parts.join(', ');
+}
+
+function closeWeekDialog() {
+  const dialog = document.querySelector('#tah-week-dialog');
+  if (!dialog) return;
+  document.removeEventListener('keydown', onWeekDialogKey, true);
+  dialog.remove();
+}
+
+function onWeekDialogKey(event) {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeWeekDialog();
+}
+
+// The dialog is the two choices that change the outcome — which calendars block
+// a time, and whether the weekend is part of "the week" — plus a live count, so
+// the result is known before the writes start.
+function openWeekFillDialog() {
+  if (state.busy || document.querySelector('#tah-week-dialog')) return;
+  if (!readGrid()) return;
+
+  const picked = new Set(state.calendar.feeds.filter((feed) => feed.on).map((feed) => feed.id));
+  let weekend = !state.settings.weekdaysOnly;
+
+  const dialog = el('div', {
+    id: 'tah-week-dialog',
+    class: 'tah-modal',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-labelledby': 'tah-week-title',
+  });
+  const box = el('div', { class: 'tah-modal-box' });
+  box.append(el('h3', { id: 'tah-week-title', text: 'Ganze Woche verfügbar' }));
+  box.append(
+    el('p', {
+      class: 'tah-modal-sub',
+      text: `${state.settings.presets.length} Blöcke à ${state.settings.duration} Min · belegte Zeiten bleiben belegt`,
+    })
+  );
+
+  if (state.calendar.feeds.length) {
+    const feeds = el('fieldset', { class: 'tah-modal-feeds' });
+    feeds.append(el('legend', { text: 'Termine dieser Kalender auslassen' }));
+    for (const feed of state.calendar.feeds) {
+      const label = el('label', { class: 'tah-check' });
+      const input = el('input', { type: 'checkbox' });
+      input.checked = picked.has(feed.id);
+      input.addEventListener('change', () => {
+        if (input.checked) picked.add(feed.id);
+        else picked.delete(feed.id);
+        refresh();
+      });
+      label.append(input, el('span', { text: `${feedTitle(feed)}${feed.error ? ' (nicht erreichbar)' : ''}` }));
+      feeds.append(label);
+    }
+    box.append(feeds);
+  }
+
+  const weekendLabel = el('label', { class: 'tah-check' });
+  const weekendInput = el('input', { id: 'tah-week-weekend', type: 'checkbox' });
+  weekendInput.checked = weekend;
+  weekendInput.addEventListener('change', () => {
+    weekend = weekendInput.checked;
+    refresh();
+  });
+  weekendLabel.append(weekendInput, el('span', { text: 'Wochenende mitnehmen (Sa + So)' }));
+  box.append(weekendLabel);
+
+  const summary = el('p', { class: 'tah-modal-summary' });
+  box.append(summary);
+
+  const actions = el('div', { class: 'tah-modal-actions' });
+  const cancel = el('button', { class: 'tah-btn tah-btn-quiet', type: 'button', text: 'Abbrechen' });
+  cancel.addEventListener('click', closeWeekDialog);
+  const apply = el('button', { class: 'tah-btn', type: 'button', text: 'Verfügbar setzen' });
+  apply.addEventListener('click', () => {
+    const plan = weekFillPlan({ feeds: picked, weekend });
+    closeWeekDialog();
+    applyToCells(plan.cells, 'available', 'Ganze Woche', planNote(plan));
+  });
+  actions.append(cancel, apply);
+  box.append(actions);
+
+  function refresh() {
+    const plan = weekFillPlan({ feeds: picked, weekend });
+    apply.disabled = plan.blocks === 0;
+    if (!plan.blocks) {
+      const note = planNote(plan);
+      const done = plan.available ? `${plan.available} bereits verfügbar` : '';
+      summary.textContent = `Nichts zu setzen${[done, note].filter(Boolean).join(', ') ? `: ${[done, note].filter(Boolean).join(', ')}` : ''}.`;
+      return;
+    }
+    // "an 1 Tag" reads badly, so the day count only appears once it is plural.
+    const days = plan.days.size > 1 ? ` an ${plan.days.size} Tagen` : '';
+    const note = planNote(plan);
+    summary.textContent = `Setzt ${plan.blocks} ${plan.blocks === 1 ? 'Block' : 'Blöcke'}${days} auf verfügbar${note ? ` · ausgelassen: ${note}` : ''}.`;
+  }
+
+  dialog.append(box);
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) closeWeekDialog();
+  });
+  document.addEventListener('keydown', onWeekDialogKey, true);
+  document.body.append(dialog);
+  refresh();
+  apply.focus();
 }
 
 function blockCellNode(cells, label, when) {
@@ -913,6 +1109,22 @@ function buildPanel() {
   hideLabel.append(hideInput, el('span', { id: 'tah-hide-label', text: `nur ${state.settings.dayFrom}–${state.settings.dayTo}` }));
   filterRow.append(weekdayLabel, hideLabel);
   panel.append(filterRow);
+
+  // The week fill is one click away, but never without the dialog: what it
+  // leaves out (busy blocks, calendar entries, the weekend) is a choice.
+  const weekRow = el('div', { class: 'tah-row tah-actions' });
+  weekRow.append(el('span', { class: 'tah-label', text: 'Woche' }));
+  const weekButton = el('button', {
+    id: 'tah-fill-week',
+    class: 'tah-btn',
+    type: 'button',
+    text: 'Ganze Woche verfügbar …',
+  });
+  weekButton.title =
+    'Setzt alle noch freien Blöcke der Woche auf verfügbar. Belegte Zeiten und Termine der gewählten Kalender bleiben stehen; Wochenende und Kalender werden im Dialog gewählt.';
+  weekButton.addEventListener('click', openWeekFillDialog);
+  weekRow.append(weekButton);
+  panel.append(weekRow);
 
   panel.append(
     el('div', {
