@@ -97,12 +97,19 @@
     <script>
       // ---- chrome.storage stub -------------------------------------------------
       window.__local = {};
+      window.__sync = {};
       window.chrome = {
         storage: {
           local: {
             get: async (defaults) => ({ ...(defaults || {}), ...window.__local }),
             set: async (values) => {
               window.__local = { ...window.__local, ...values };
+            },
+          },
+          sync: {
+            get: async (defaults) => ({ ...(defaults || {}), ...window.__sync }),
+            set: async (values) => {
+              window.__sync = { ...window.__sync, ...values };
             },
           },
           onChanged: { addListener: () => {} },
@@ -128,7 +135,9 @@
       // ---- mock bookings -------------------------------------------------------
       let seed = 42;
       const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-      const TIMES = ['09:55', '11:15', '12:55', '14:00', '16:35'];
+      // Non-overlapping starts for 105-minute tours: the pauses between two
+      // shifts are what the commute figures are about.
+      const TIMES = ['09:55', '12:00', '14:00', '16:35'];
       const CATEGORIES = [
         ['Öffentlicher Rundgang | Einzelbesucher', 'Öffentlicher Rundgang (Englisch)', 0],
         ['Das Stasi-Gefängnis (Gruppenführung)', 'Das Stasi-Gefängnis (Gruppenführung)', 22],

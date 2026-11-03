@@ -7,7 +7,8 @@ your own calendar — paste the **iCal** address and appointments appear in the
 grid, so you never offer a tour you are already busy for. On the calendar page it
 turns the month's shifts into a printable invoice, letterhead and all. And the
 **Statistik** tab in the sidebar charts your income per week, month and year,
-with a forecast for the year's end.
+with a forecast for the year's end — and shows what an hour really pays once the
+ride to the museum and the pauses between two tours are counted.
 
 ![The block view: one row per tour, one cell per day, with per-day check and cross buttons](docs/screenshot.png)
 
@@ -239,10 +240,19 @@ one period back or forward. Below that:
 - **Teilnehmende, Absagen, Einsätze pro Woche, Absagequote** — the smaller row.
 - **Prognose zum 31.12.** (year view) — what the year will most likely end at,
   with a range and how much of it is already booked.
+- **Effektiver Stundensatz, Wartezeit, Radkilometer, Effizienz** — what an hour
+  really pays once the pause between two tours and the ride to the museum are
+  counted, not just the tour time.
+- **Effiziente Tage, Tage mit Pause, längste Pause, Tage mit 2+ Einsätzen** — how
+  often a day is one trip instead of a split shift, and what the waiting costs.
 - **Einnahmen je Tag / je Monat** — bars split into Honorar and
   Ausfallhonorar.
+- **Zeitaufwand je Tag / je Monat** — the same days as hours, split into work,
+  waiting between tours and the ride.
 - **Prognose bis Jahresende** — cumulative income so far, the projection, and
   the range it sits in.
+- **Arbeitstage nach Pausenlänge** — the share of days without a pause, with a
+  short pause and with a long one.
 - **Einsätze nach Wochentag**, **Angebote nach Einsätzen**, **Startzeiten** —
   where the work actually is.
 - **Auffälligkeiten** — the strongest weekday, the busiest start time, the best
@@ -251,6 +261,18 @@ one period back or forward. Below that:
 Only bookings with an amount count: a cancellation by the group brings its
 Ausfallhonorar and stays in, while a cancellation by the guide or a booking you
 were moved off has no amount and is left out (the footer says how many).
+
+**Arbeitsweg und Pausen.** The *Arbeitsweg & Pausen* card holds the assumptions
+behind the commute figures: the distance to the museum (one way, 10 km
+by default), the bike speed, a preparation time per workday and the pause length
+that still counts as efficient (45 minutes by default). The ride is counted
+twice per workday, and a pause between two tours counts as time at the museum,
+not as free time — that is exactly what the effective hourly rate is for. A day
+runs from the first tour to the last, so two tours with three hours in between
+are one long day, not two short ones. A day without a pause over the limit counts
+as efficient, including a day with only one tour. The values are saved in
+Chrome's sync storage, so they follow the profile; changing one recomputes the
+figures immediately, without reloading the bookings.
 
 **How the forecast works.** The year is cut into weeks. Every week that is
 already over contributes its income; the median of those weeks is what a typical

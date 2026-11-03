@@ -264,6 +264,24 @@ daily average. The cumulative chart's current-month point is the actual income;
 the dashed line starts there. A past year shows only "abgeschlossen", a future
 year only "geplant" — no forecast is invented for either.
 
+The commute and pause figures (`workload()`) answer what an hour is really worth
+once the day is spent at the museum, not just during the tour. A workday is one
+date with at least one billable tour; it runs from the first start to the last
+end, so a split shift is paid per tour but spent per day. `commuteKm` is one way
+and ridden twice per workday at `commuteSpeed` (the guide stays on site between
+two tours); `prepMinutes` is added once per workday. The four assumptions
+(`commuteKm`, `commuteSpeed`, `prepMinutes`, `gapLimit`) are edited in the
+**Arbeitsweg & Pausen** card in the view and live in `chrome.storage.sync`. The
+view is their only consumer, so this is their one place — do not mirror them in
+the popup. The effective rate is `income / (span + commute + prep)`; the paid
+rate is `income / tour minutes`, and `lost` prices the pauses at the paid rate.
+A day is *efficient* when its pause is at most `gapLimit` minutes, *medium* up to
+twice that, *long* beyond; the doughnut in the workload card draws the same three
+bands, and the workload chart stacks work, pause and commute per bucket.
+`buildStats` keeps the raw `bookings` so `recompute()` can redraw after an
+assumption change without refetching detail pages. `tools/stats-harness.html`
+stubs `sync` as well as `local`, otherwise the card would show defaults only.
+
 Chart.js is **vendored** in `vendor/` and loaded as a content script on every
 guide page (~206 KB, ~10 ms). That is the one deliberate exception to
 "dependency-free": the user asked for a real charting library, and MV3 may not

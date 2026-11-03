@@ -30,6 +30,17 @@ var TAH_STATS = (function () {
   const DETAIL_MAX_AGE = 400 * 24 * 60 * 60 * 1000;
   const DETAIL_CONCURRENCY = 8;
 
+  // Assumptions for the "what does an hour really pay" figures. The distance is
+  // one way and is ridden twice on every workday; a pause between two tours is
+  // time at the museum, not time off. Sync, not local: these describe the
+  // person, like the invoice letterhead.
+  const COMMUTE_DEFAULTS = {
+    commuteKm: 10,
+    commuteSpeed: 15,
+    prepMinutes: 0,
+    gapLimit: 45,
+  };
+
   const view = {
     period: 'month',
     anchor: iso(new Date()),
@@ -38,6 +49,7 @@ var TAH_STATS = (function () {
     token: 0,
     error: '',
     data: null,
+    commute: { ...COMMUTE_DEFAULTS },
     charts: {},
     hiddenActive: [],
     observer: null,
@@ -71,6 +83,22 @@ var TAH_STATS = (function () {
   }
 
   const daysBetween = (a, b) => Math.round((b - a) / 86400000);
+
+  // Minutes since local midnight. The booking list prints wall-clock times, so
+  // no timezone conversion is involved here.
+  function minutesOfTime(value) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+    return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
+  }
+
+  function clock(minutes) {
+    return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+  }
+
+  function dayLabel(key) {
+    const date = fromIso(key);
+    return `${WEEKDAY_SHORT[(date.getDay() + 6) % 7]} ${key.split('-').reverse().join('.')}`;
+  }
 
   // ISO 8601 week number: the week of the year's first Thursday.
   function isoWeek(date) {
@@ -242,6 +270,114 @@ var TAH_STATS = (function () {
       weeks: weeks.size,
       skipped: bookings.length - billable.length,
     };
+  }
+
+  // A workday is one calendar date with at least one billable tour. It starts
+  // with the first tour and ends with the last, so a split shift is paid by the
+  // tour but spent by the day: the pause in between is neither work nor free.
+  // The commute is ridden twice per workday, because the guide stays on site.
+  function workload(tours, settings, period, range) {
+    const km = Math.max(0, Number(settings.commuteKm) || 0);
+    const speed = Math.max(1, Number(settings.commuteSpeed) || 1);
+    const prep = Math.max(0, Math.round(Number(settings.prepMinutes) || 0));
+    const limit = Math.max(1, Math.round(Number(settings.gapLimit) || 1));
+    const commute = km > 0 ? Math.round(((2 * km) / speed) * 60) : 0;
+
+    const byDate = new Map();
+    for (const row of tours) {
+      if (!byDate.has(row.date)) byDate.set(row.date, []);
+      byDate.get(row.date).push(row);
+    }
+
+    const days = [...byDate.keys()].sort().map((date) => {
+      const rows = byDate.get(date);
+      const items = rows.map((row) => {
+        const start = minutesOfTime(row.time);
+        const duration = Number(row.duration) || 0;
+        return { start, end: start + duration, duration };
+      });
+      const timed = items.filter((item) => Number.isFinite(item.start));
+      const work = items.reduce((total, item) => total + item.duration, 0);
+      const first = timed.length ? Math.min(...timed.map((item) => item.start)) : 0;
+      const last = timed.length ? Math.max(...timed.map((item) => item.end)) : work;
+      // Overlapping rows (a 105-minute tour listed at 09:55 and 11:15) would
+      // otherwise give a negative pause; the tours themselves are the floor.
+      const span = Math.max(work, last - first);
+      const gap = span - work;
+      const away = span + commute + prep;
+      const income = rows.reduce((total, row) => total + (Number(row.price) || 0), 0);
+      return {
+        date,
+        rows,
+        first,
+        last,
+        work,
+        span,
+        gap,
+        commute,
+        prep,
+        away,
+        income,
+        band: gap <= limit ? 'efficient' : gap <= limit * 2 ? 'medium' : 'long',
+      };
+    });
+
+    const total = (key) => days.reduce((sum, day) => sum + day[key], 0);
+    const work = total('work');
+    const gap = total('gap');
+    const away = total('away');
+    const income = total('income');
+    const longest = days.reduce((best, day) => (!best || day.gap > best.gap ? day : best), null);
+    const multi = days.filter((day) => day.rows.length > 1);
+    const count = (band) => days.filter((day) => day.band === band).length;
+    const paidRate = work ? income / (work / 60) : 0;
+
+    return {
+      days,
+      limit,
+      km,
+      work,
+      gap,
+      away,
+      income,
+      commuteTotal: days.length * commute,
+      kmTotal: days.length * 2 * km,
+      paidRate,
+      effectiveRate: away ? income / (away / 60) : 0,
+      efficiency: away ? Math.min(1, work / away) : 0,
+      lost: paidRate ? (gap / 60) * paidRate : 0,
+      efficient: count('efficient'),
+      medium: count('medium'),
+      long: count('long'),
+      longest: longest && longest.gap > 0 ? longest : null,
+      multi,
+      chart: workloadTimeline(period, range, days),
+    };
+  }
+
+  // Same buckets as the income timeline, so the two charts line up; the bars are
+  // hours instead of euros.
+  function workloadTimeline(period, range, days) {
+    const buckets =
+      period === 'year'
+        ? MONTH_SHORT.map((label, index) => ({ key: `${range.from.slice(0, 4)}-${pad(index + 1)}`, label }))
+        : bucketDays(range.from, range.to).map((bucket) => ({
+            ...bucket,
+            label: period === 'week' ? `${WEEKDAY_SHORT[(bucket.date.getDay() + 6) % 7]} ${bucket.label}` : bucket.label,
+          }));
+    const indexOf = new Map(buckets.map((bucket, index) => [bucket.key, index]));
+    const work = buckets.map(() => 0);
+    const gap = buckets.map(() => 0);
+    const commute = buckets.map(() => 0);
+    for (const day of days) {
+      const key = period === 'year' ? day.date.slice(0, 7) : day.date;
+      const index = indexOf.get(key);
+      if (index === undefined) continue;
+      work[index] += day.work / 60;
+      gap[index] += day.gap / 60;
+      commute[index] += (day.commute + day.prep) / 60;
+    }
+    return { labels: buckets.map((bucket) => bucket.label), work, gap, commute };
   }
 
   function bucketDays(from, to) {
@@ -463,8 +599,10 @@ var TAH_STATS = (function () {
       range,
       period,
       agg,
+      bookings,
       failed: extra.failed || 0,
       timeline: timeline(period, range, agg.billable),
+      workload: workload(agg.tours, view.commute, period, range),
       weekdays: byWeekday(agg.tours),
       times: byTime(agg.tours),
       offers: byOffer(agg.tours),
@@ -691,6 +829,118 @@ var TAH_STATS = (function () {
     return el('p', { class: 'tah-stats-empty', text });
   }
 
+  /* ---------- commute & pauses ---------- */
+
+  // The four assumptions are editable right where their effect is visible: the
+  // view is the only consumer, so this is their one place. They are written to
+  // sync storage, like the invoice's person data.
+  function numberField(key, label, { min = 0, step = 1 } = {}) {
+    const wrap = el('label', { class: 'tah-assume-field' });
+    wrap.append(el('span', { text: label }));
+    const input = el('input', {
+      type: 'number',
+      min: String(min),
+      step: String(step),
+      value: String(view.commute[key]),
+    });
+    input.addEventListener('change', () => {
+      const value = Math.max(min, Number(input.value) || 0);
+      input.value = String(value);
+      view.commute[key] = value;
+      try {
+        chrome.storage.sync.set({ [key]: value }).catch(() => {});
+      } catch {
+        /* no sync storage (the harness stubs it) */
+      }
+      recompute();
+    });
+    wrap.append(input);
+    return wrap;
+  }
+
+  function assumptionsCard() {
+    const box = el('div', { class: 'tah-assume' });
+    const head = el('div', { class: 'tah-assume-head' });
+    head.append(el('h3', { text: 'Arbeitsweg & Pausen' }));
+    head.append(
+      el('span', {
+        class: 'tah-assume-hint',
+        text: 'Hin- und Rückfahrt je Arbeitstag; die Pause zwischen zwei Einsätzen ist Anwesenheit, keine Freizeit.',
+      })
+    );
+    box.append(head);
+
+    const fields = el('div', { class: 'tah-assume-fields' });
+    fields.append(
+      numberField('commuteKm', 'Anfahrt (km, einfach)', { step: 0.5 }),
+      numberField('commuteSpeed', 'Radtempo (km/h)', { min: 1 }),
+      numberField('prepMinutes', 'Rüstzeit je Tag (min)', { step: 5 }),
+      numberField('gapLimit', 'Pause bis (min) gilt als effizient', { min: 1, step: 5 })
+    );
+    box.append(fields);
+    return box;
+  }
+
+  function workloadCard(wl) {
+    const box = el('section', { class: 'tah-workload' });
+    box.append(assumptionsCard());
+
+    const kpis = el('div', { class: 'tah-kpis' });
+    kpis.append(
+      kpi(
+        wl.effectiveRate ? `${T.formatMoney(wl.effectiveRate)}/h` : '–',
+        'Effektiver Stundensatz',
+        wl.paidRate ? `statt ${T.formatMoney(wl.paidRate)}/h pro Tourstunde` : ''
+      ),
+      kpi(hours(wl.gap), 'Wartezeit', wl.gap ? `entspricht ${T.formatMoney(wl.lost)} Honorar` : 'keine Pausen'),
+      kpi(
+        wl.km ? `${wl.kmTotal.toLocaleString('de-DE', { maximumFractionDigits: 0 })} km` : '–',
+        'Radkilometer',
+        wl.km ? `${hours(wl.commuteTotal)} Fahrzeit · ${wl.days.length * 2} Fahrten` : 'keine Anfahrt eingetragen'
+      ),
+      kpi(`${Math.round(wl.efficiency * 100)} %`, 'Effizienz', 'bezahlte Zeit von Tür zu Tür')
+    );
+
+    const small = el('div', { class: 'tah-kpis tah-kpis-small' });
+    small.append(
+      kpi(String(wl.efficient), 'Effiziente Tage', `von ${wl.days.length} · Pause ≤ ${wl.limit} min`),
+      kpi(
+        String(wl.medium + wl.long),
+        'Tage mit Pause',
+        wl.medium + wl.long === 0
+          ? 'keine über dem Limit'
+          : wl.long
+            ? `davon ${wl.long} über ${wl.limit * 2} min`
+            : `über ${wl.limit} min`
+      ),
+      kpi(wl.longest ? hours(wl.longest.gap) : '–', 'Längste Pause', wl.longest ? dayLabel(wl.longest.date) : 'keine'),
+      kpi(
+        String(wl.multi.length),
+        'Tage mit 2+ Einsätzen',
+        wl.days.length ? `${Math.round((wl.multi.length / wl.days.length) * 100)} % der Arbeitstage` : 'keine geteilten Tage'
+      )
+    );
+
+    // The distribution sits next to its key figures instead of in the chart
+    // grid: the grid is laid out for three small charts and a fourth would be
+    // left alone in a row.
+    const body = el('div', { class: 'tah-workload-body' });
+    const figures = el('div', { class: 'tah-workload-kpis' });
+    figures.append(kpis, small);
+    body.append(figures, figure('tah-chart-efficiency', 'Arbeitstage nach Pausenlänge'));
+    box.append(body);
+    return box;
+  }
+
+  // Recompute from the bookings already in memory: changing an assumption must
+  // not refetch a year of detail pages.
+  function recompute() {
+    if (!view.data) return;
+    const { bookings, range, failed } = view.data;
+    view.data = buildStats(bookings, range, { failed });
+    render();
+  }
+
   function render() {
     const body = document.querySelector('#tah-stats-body');
     if (!body) return;
@@ -737,12 +987,20 @@ var TAH_STATS = (function () {
     body.append(small);
 
     if (forecast) body.append(forecastCard(forecast, range));
+    if (agg.tours.length) body.append(workloadCard(view.data.workload));
 
     if (!agg.billable.length) {
       body.append(empty('Keine berechenbaren Buchungen in diesem Zeitraum.'));
     } else {
       const charts = el('div', { class: 'tah-charts' });
       charts.append(figure('tah-chart-income', period === 'year' ? 'Einnahmen je Monat' : 'Einnahmen je Tag', { wide: true }));
+      charts.append(
+        figure(
+          'tah-chart-workload',
+          period === 'year' ? 'Zeitaufwand je Monat: Arbeit, Wartezeit, Anfahrt' : 'Zeitaufwand je Tag: Arbeit, Wartezeit, Anfahrt',
+          { wide: true }
+        )
+      );
       if (forecast && forecast.kind === 'current') charts.append(figure('tah-chart-forecast', 'Prognose bis Jahresende (kumuliert)', { wide: true }));
       charts.append(figure('tah-chart-weekday', 'Einsätze nach Wochentag'));
       charts.append(figure('tah-chart-offer', 'Angebote nach Einsätzen'));
@@ -834,6 +1092,30 @@ var TAH_STATS = (function () {
     const longest = [...agg.tours].sort((a, b) => b.price - a.price)[0];
     if (longest) out.push(`Höchster Einzelbetrag: ${T.formatMoney(longest.price)} am ${longest.date.split('-').reverse().join('.')}`);
 
+    const wl = data.workload;
+    if (wl.days.length) {
+      out.push(
+        `${wl.efficient} von ${wl.days.length} Arbeitstagen ohne Pause über ${wl.limit} min (${Math.round((wl.efficient / wl.days.length) * 100)} %)`
+      );
+      if (wl.multi.length) {
+        out.push(
+          `${wl.multi.length} Tage mit mehreren Einsätzen — ${Math.round((wl.multi.length / wl.days.length) * 100)} % der Arbeitstage`
+        );
+      }
+      if (wl.gap) out.push(`Wartezeit zwischen Einsätzen: ${hours(wl.gap)} — das entspricht ${T.formatMoney(wl.lost)} Honorar`);
+      if (wl.longest) {
+        out.push(
+          `Längste Pause: ${hours(wl.longest.gap)} am ${dayLabel(wl.longest.date)} (${clock(wl.longest.first)}–${clock(wl.longest.last)})`
+        );
+      }
+      if (wl.km) out.push(`Arbeitsweg: ${Math.round(wl.kmTotal)} km und ${hours(wl.commuteTotal)} Fahrzeit bei ${wl.km} km einfacher Strecke`);
+      if (wl.effectiveRate) {
+        out.push(
+          `Effektiver Stundensatz ${T.formatMoney(wl.effectiveRate)}/h — ${T.formatMoney(wl.paidRate - wl.effectiveRate)}/h weniger als pro Tourstunde`
+        );
+      }
+    }
+
     if (data.period !== 'year') {
       out.push(`Zeitraum: ${range.from.split('-').reverse().join('.')} – ${range.to.split('-').reverse().join('.')}`);
     }
@@ -907,6 +1189,71 @@ var TAH_STATS = (function () {
               afterBody: (items) => {
                 const count = timeline.count[items[0].dataIndex];
                 return count ? `${count} ${count === 1 ? 'Einsatz' : 'Einsätze'}` : '';
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const workload = data.workload;
+    chart('tah-chart-workload', {
+      type: 'bar',
+      data: {
+        labels: workload.chart.labels,
+        datasets: [
+          {
+            label: 'Arbeit',
+            data: workload.chart.work,
+            backgroundColor: '#1e4b8c',
+            borderRadius: 2,
+            stack: 'time',
+            barPercentage: data.period === 'year' ? 0.7 : 0.85,
+            categoryPercentage: 0.9,
+          },
+          {
+            label: 'Wartezeit',
+            data: workload.chart.gap,
+            backgroundColor: '#f0a30a',
+            borderRadius: 2,
+            stack: 'time',
+            barPercentage: data.period === 'year' ? 0.7 : 0.85,
+            categoryPercentage: 0.9,
+          },
+          {
+            label: 'Anfahrt',
+            data: workload.chart.commute,
+            backgroundColor: '#90a4ae',
+            borderRadius: 2,
+            stack: 'time',
+            barPercentage: data.period === 'year' ? 0.7 : 0.85,
+            categoryPercentage: 0.9,
+          },
+        ],
+      },
+      options: {
+        ...base,
+        scales: {
+          x: {
+            grid: { display: false },
+            stacked: true,
+            ticks: { maxRotation: 0, autoSkip: data.period === 'month' },
+          },
+          y: {
+            beginAtZero: true,
+            stacked: true,
+            grid,
+            ticks: { callback: (value) => `${value} h` },
+          },
+        },
+        plugins: {
+          ...base.plugins,
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('de-DE', { maximumFractionDigits: 1 })} h`,
+              footer: (items) => {
+                const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
+                return `Tür zu Tür: ${total.toLocaleString('de-DE', { maximumFractionDigits: 1 })} h`;
               },
             },
           },
@@ -1070,9 +1417,50 @@ var TAH_STATS = (function () {
         },
       },
     });
+
+    chart('tah-chart-efficiency', {
+      type: 'doughnut',
+      data: {
+        labels: [
+          `Effizient (≤ ${workload.limit} min)`,
+          `Mittlere Pause (≤ ${workload.limit * 2} min)`,
+          `Lange Pause (> ${workload.limit * 2} min)`,
+        ],
+        datasets: [
+          {
+            data: [workload.efficient, workload.medium, workload.long],
+            backgroundColor: ['#4caf50', '#f0a30a', '#b3261e'],
+            borderColor: '#fff',
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        ...base,
+        cutout: '55%',
+        plugins: {
+          ...base.plugins,
+          legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.label}: ${ctx.parsed} ${ctx.parsed === 1 ? 'Tag' : 'Tage'}`,
+            },
+          },
+        },
+      },
+    });
   }
 
   /* ---------- loading ---------- */
+
+  async function loadCommute() {
+    try {
+      const stored = await chrome.storage.sync.get(COMMUTE_DEFAULTS);
+      view.commute = { ...COMMUTE_DEFAULTS, ...stored };
+    } catch {
+      view.commute = { ...COMMUTE_DEFAULTS };
+    }
+  }
 
   async function load({ force = false } = {}) {
     if (!document.querySelector('#tah-stats')) return;
@@ -1087,6 +1475,7 @@ var TAH_STATS = (function () {
 
     const range = rangeFor(view.period, view.anchor);
     try {
+      await loadCommute();
       const result = await loadBookings(range, { force, token });
       if (token !== view.token || !result) return;
       view.loading = false;
@@ -1105,6 +1494,7 @@ var TAH_STATS = (function () {
   async function boot() {
     const stored = await chrome.storage.local.get({ statsPeriod: 'month' });
     if (PERIODS.some(([value]) => value === stored.statsPeriod)) view.period = stored.statsPeriod;
+    await loadCommute();
     installNav();
   }
 
