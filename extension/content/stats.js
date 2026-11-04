@@ -30,6 +30,12 @@ var TAH_STATS = (function () {
   const DETAIL_MAX_AGE = 400 * 24 * 60 * 60 * 1000;
   const DETAIL_CONCURRENCY = 8;
 
+  // How far ahead the "noch ausstehend" figure looks. Bookings are made weeks
+  // ahead, so the money already promised does not stop at the period on screen;
+  // the horizon keeps the extra list requests bounded (one year of months, and
+  // those months are cached like every other one).
+  const PENDING_MONTHS = 12;
+
   // Assumptions for the "what does an hour really pay" figures. The distance is
   // one way and is ridden twice on every workday; a pause between two tours is
   // time at the museum, not time off. Sync, not local: these describe the
@@ -57,6 +63,8 @@ var TAH_STATS = (function () {
     token: 0,
     error: '',
     data: null,
+    pending: null,
+    pendingToken: 0,
     commute: { ...COMMUTE_DEFAULTS },
     bikePhoto: '',
     charts: {},
@@ -104,10 +112,22 @@ var TAH_STATS = (function () {
     return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
   }
 
+  // Start of a booking as a local Date. A row without a readable time falls back
+  // to midnight, which only ever makes it "earlier", never "later".
+  function bookingStart(row) {
+    const [y, m, d] = row.date.split('-').map(Number);
+    const minutes = minutesOfTime(row.time);
+    return Number.isFinite(minutes)
+      ? new Date(y, m - 1, d, Math.floor(minutes / 60), minutes % 60)
+      : new Date(y, m - 1, d);
+  }
+
   function dayLabel(key) {
     const date = fromIso(key);
     return `${WEEKDAY_SHORT[(date.getDay() + 6) % 7]} ${key.split('-').reverse().join('.')}`;
   }
+
+  const yearOf = (range) => Number(range.from.slice(0, 4));
 
   // ISO 8601 week number: the week of the year's first Thursday.
   function isoWeek(date) {
@@ -178,8 +198,8 @@ var TAH_STATS = (function () {
     if (node) node.textContent = text;
   }
 
-  async function loadBookings(range, { force = false, token = 0 } = {}) {
-    const months = monthsInRange(range.from, range.to);
+  async function loadBookings(range, { force = false, isStale = () => false, months = null, progressLabel = 'Lade Buchungen' } = {}) {
+    const monthList = months || monthsInRange(range.from, range.to);
     const stored = await chrome.storage.local.get({ statsMonths: {}, bookingDetails: {} });
     const monthCache = stored.statsMonths || {};
     const detailCache = stored.bookingDetails || {};
@@ -187,14 +207,14 @@ var TAH_STATS = (function () {
     let detailDirty = false;
 
     const rows = [];
-    for (const [index, month] of months.entries()) {
-      if (token && token !== view.token) return null;
+    for (const [index, month] of monthList.entries()) {
+      if (isStale()) return null;
       const hit = monthCache[month];
       let list;
       if (!force && hit && Date.now() - hit.fetchedAt < LIST_TTL) {
         list = hit.rows;
       } else {
-        setProgress(`Lade Buchungen ${index + 1}/${months.length} …`);
+        setProgress(`${progressLabel} ${index + 1}/${monthList.length} …`);
         list = (await T.fetchMonthBookings(month)).map(listRow);
         monthCache[month] = { rows: list, fetchedAt: Date.now() };
         listDirty = true;
@@ -212,6 +232,9 @@ var TAH_STATS = (function () {
     let done = 0;
     if (stale.length) {
       await T.pool(stale, DETAIL_CONCURRENCY, async (row) => {
+        // The view was closed or reloaded: stop spending requests on a figure
+        // nobody is looking at any more.
+        if (isStale()) return;
         try {
           const full = await T.enrichBooking({ ...row });
           detailCache[row.id] = {
@@ -251,6 +274,74 @@ var TAH_STATS = (function () {
       };
     });
     return { bookings, failed };
+  }
+
+  /* ---------- money still to come ---------- */
+
+  // From today to the end of the horizon, in whole months: the list endpoint is
+  // asked per month anyway, and a month is the unit the cache speaks.
+  function pendingRange() {
+    const today = new Date();
+    return { from: iso(today), to: iso(new Date(today.getFullYear(), today.getMonth() + PENDING_MONTHS, 0)) };
+  }
+
+  // Only what is still Gebucht and carries an Honorar: a cancelled booking has
+  // an Ausfallhonorar, but that is not a tour that is going to happen, and a row
+  // without an amount is not billable at all (see the invoice notes). The clock
+  // time counts too — this morning's tour is earned, not pending, by the evening.
+  function pendingStats(bookings, range, failed = 0) {
+    const now = new Date();
+    const future = bookings.filter((row) => row.price > 0 && !row.cancelled && bookingStart(row) >= now);
+    const months = new Map();
+    for (const row of future) {
+      const key = row.date.slice(0, 7);
+      const entry = months.get(key) || { key, total: 0, tours: 0 };
+      entry.total += row.price;
+      entry.tours += 1;
+      months.set(key, entry);
+    }
+    const next = [...future].sort((a, b) => bookingStart(a) - bookingStart(b))[0] || null;
+    return {
+      range,
+      // `failed` is the card's own "could not load at all" state, so the detail
+      // pages that did not answer get their own name.
+      missing: failed,
+      total: sum(future, 'price'),
+      tours: future.length,
+      days: new Set(future.map((row) => row.date)).size,
+      months: [...months.values()].sort((a, b) => a.key.localeCompare(b.key)),
+      next,
+    };
+  }
+
+  // Loaded after the year is drawn, never instead of it: the figure reaches past
+  // the year on screen (bookings are made weeks ahead), which costs a handful of
+  // extra list requests the first time and nothing after that. Sequential on
+  // purpose — both loads read and write the same `statsMonths` map, and two
+  // writers racing on it would each save the map as it looked before the other
+  // answered.
+  async function loadPending({ force = false } = {}) {
+    if (!view.open || view.period !== 'year' || (view.pending && !view.pending.loading && !force)) return;
+    const token = ++view.pendingToken;
+    view.pending = { loading: true };
+    renderPending();
+
+    const range = pendingRange();
+    try {
+      const result = await loadBookings(range, {
+        force,
+        isStale: () => token !== view.pendingToken,
+        months: monthsInRange(range.from, range.to),
+        progressLabel: 'Lade kommende Buchungen',
+      });
+      if (!result || token !== view.pendingToken) return;
+      view.pending = pendingStats(result.bookings, range, result.failed);
+      setProgress('');
+    } catch {
+      if (token !== view.pendingToken) return;
+      view.pending = { failed: true };
+    }
+    renderPending();
   }
 
   /* ---------- aggregation ---------- */
@@ -750,6 +841,9 @@ var TAH_STATS = (function () {
     const root = buildRoot();
     document.body.append(root);
     view.open = true;
+    // Always recomputed on open: the figure starts at "today", so a view that
+    // sat in a background tab overnight must not keep yesterday's answer.
+    view.pending = null;
     document.body.classList.add('tah-stats-open');
     markNav(true);
     position(root);
@@ -771,6 +865,9 @@ var TAH_STATS = (function () {
     root.remove();
     view.open = false;
     view.token += 1;
+    // A pending load that is still walking the upcoming months stops here.
+    view.pendingToken += 1;
+    view.pending = null;
     document.body.classList.remove('tah-stats-open');
     markNav(false);
     window.removeEventListener('resize', onResize);
@@ -841,6 +938,79 @@ var TAH_STATS = (function () {
 
   function empty(text) {
     return el('p', { class: 'tah-stats-empty', text });
+  }
+
+  // The money that is already in the book but not yet earned. A pipeline figure,
+  // not a period figure: it always starts today and always ends at the horizon,
+  // whatever year is on screen.
+  function pendingCard(state) {
+    const box = el('section', { id: 'tah-pending', class: 'tah-pending' });
+    box.append(el('span', { class: 'tah-pending-label', text: 'Noch ausstehend · bestätigte Buchungen ab heute' }));
+
+    if (!state || state.loading) {
+      box.append(el('strong', { text: '…' }), el('span', { class: 'tah-pending-range', text: 'lade kommende Buchungen …' }));
+      return box;
+    }
+    if (state.failed) {
+      box.append(
+        el('strong', { text: '–' }),
+        el('span', { class: 'tah-pending-range', text: 'kommende Buchungen konnten nicht geladen werden' })
+      );
+      return box;
+    }
+    if (!state.tours) {
+      // With detail pages missing, an empty figure is not "nothing booked".
+      box.append(
+        el('strong', { text: T.formatMoney(0) }),
+        el('span', {
+          class: 'tah-pending-range',
+          text: state.missing
+            ? `${state.missing} ${state.missing === 1 ? 'Buchung' : 'Buchungen'} nicht geladen`
+            : 'keine bestätigten Buchungen ab heute',
+        })
+      );
+      return box;
+    }
+
+    box.append(el('strong', { text: T.formatMoney(state.total) }));
+    box.append(
+      el('span', {
+        class: 'tah-pending-range',
+        text: `${state.tours} ${state.tours === 1 ? 'Einsatz' : 'Einsätze'} bis ${T.monthLabel(state.range.to.slice(0, 7))}`,
+      })
+    );
+
+    const meta = el('div', { class: 'tah-pending-meta' });
+    meta.append(el('span', { text: `${state.days} ${state.days === 1 ? 'Arbeitstag' : 'Arbeitstage'}` }));
+    if (state.next) meta.append(el('span', { text: `nächster Einsatz ${dayLabel(state.next.date)}, ${state.next.time} Uhr` }));
+    meta.append(
+      el('span', {
+        text: state.months
+          .map((month) => `${MONTH_SHORT[Number(month.key.slice(5, 7)) - 1]} ${month.key.slice(0, 4)}: ${moneyShort(month.total)}`)
+          .join(' · '),
+      })
+    );
+    // A detail page that did not answer leaves its booking out of the sum, so
+    // say so rather than letting the figure look complete.
+    if (state.missing) meta.append(el('span', { text: `${state.missing} nicht geladen` }));
+    box.append(meta);
+    return box;
+  }
+
+  // The pending load finishes long after the period was drawn; swap only that
+  // one card in instead of redrawing the view (and its charts) underneath the
+  // reader.
+  function renderPending() {
+    const node = document.querySelector('#tah-pending');
+    if (node) node.replaceWith(pendingCard(view.pending));
+  }
+
+  // The two forward-looking figures share one row, year view only: the money
+  // already booked but not yet earned, and where the year is heading.
+  function pipelineRow() {
+    const row = el('div', { class: 'tah-pipeline' });
+    row.append(pendingCard(view.pending), forecastCard(view.data.forecast, yearOf(view.data.range)));
+    return row;
   }
 
   /* ---------- commute & pauses ---------- */
@@ -1018,8 +1188,8 @@ var TAH_STATS = (function () {
       kpi(agg.billable.length ? `${Math.round((agg.cancellations.length / agg.billable.length) * 100)} %` : '–', 'Absagequote', 'der berechenbaren Buchungen')
     );
     body.append(small);
+    if (period === 'year') body.append(pipelineRow());
 
-    if (forecast) body.append(forecastCard(forecast, range));
     if (agg.tours.length) body.append(workloadCard(view.data.workload));
 
     if (!agg.billable.length) {
@@ -1068,23 +1238,23 @@ var TAH_STATS = (function () {
     return quantile(values, 0.5);
   }
 
-  function forecastCard(forecast, range) {
-    const box = el('section', { class: `tah-forecast tah-forecast-${forecast.kind}` });
+  function forecastCard(forecast, year) {
+    const box = el('section', { id: 'tah-forecast-card', class: `tah-forecast tah-forecast-${forecast.kind}` });
 
     if (forecast.kind === 'past') {
-      box.append(el('span', { class: 'tah-forecast-label', text: `${range.from.slice(0, 4)} abgeschlossen` }));
+      box.append(el('span', { class: 'tah-forecast-label', text: `${year} abgeschlossen` }));
       box.append(el('strong', { text: T.formatMoney(forecast.total) }));
       box.append(el('span', { class: 'tah-forecast-range', text: `${forecast.tours} Einsätze im Jahr` }));
       return box;
     }
     if (forecast.kind === 'future') {
-      box.append(el('span', { class: 'tah-forecast-label', text: `${range.from.slice(0, 4)} liegt noch vor uns` }));
+      box.append(el('span', { class: 'tah-forecast-label', text: `${year} liegt noch vor uns` }));
       box.append(el('strong', { text: T.formatMoney(forecast.total) }));
       box.append(el('span', { class: 'tah-forecast-range', text: `bereits gebucht: ${forecast.tours} Einsätze` }));
       return box;
     }
 
-    box.append(el('span', { class: 'tah-forecast-label', text: `Prognose zum 31.12.${range.from.slice(0, 4)}` }));
+    box.append(el('span', { class: 'tah-forecast-label', text: `Prognose zum 31.12.${year}` }));
     box.append(el('strong', { text: T.formatMoney(forecast.total) }));
     box.append(el('span', { class: 'tah-forecast-range', text: `Spanne ${moneyShort(forecast.low)} – ${moneyShort(forecast.high)}` }));
 
@@ -1504,11 +1674,14 @@ var TAH_STATS = (function () {
     const range = rangeFor(view.period, view.anchor);
     try {
       await loadStatsSettings();
-      const result = await loadBookings(range, { force, token });
+      const result = await loadBookings(range, { force, isStale: () => token !== view.token });
       if (token !== view.token || !result) return;
       view.loading = false;
       view.data = buildStats(result.bookings, range, result);
       render();
+      // Not awaited: the period is already on screen, the pipeline figure fills
+      // in on its own card.
+      loadPending({ force });
     } catch (err) {
       if (token !== view.token) return;
       view.loading = false;

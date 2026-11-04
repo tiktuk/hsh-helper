@@ -330,13 +330,36 @@ the invoice prints it. `fetchMonthBookings` throws "Nicht angemeldet" when the
 response contains a password field, because a logged-out session redirects to the
 login form and still answers `200`.
 
-The forecast (year view only) cuts the year into weeks. Completed whole weeks
-inside the year give the median weekly income; each remaining week is estimated
-at `max(booked in that week, median × remaining fraction)`, the band uses the
-same weeks' p25/p75, and fewer than three completed weeks fall back to the year's
-daily average. The cumulative chart's current-month point is the actual income;
-the dashed line starts there. A past year shows only "abgeschlossen", a future
-year only "geplant" — no forecast is invented for either.
+**Noch ausstehend** (`pendingCard`) is the one figure that is not about the
+period on screen: it sums every billable, non-cancelled booking from now to the
+end of a twelve-month horizon (`PENDING_MONTHS` → `pendingRange()`), whatever
+year is selected. Group cancellations are excluded — their Ausfallhonorar is
+income, but not a tour that is going to happen — and the start *time* is
+compared, so this morning's tour is earned, not pending, by the evening.
+`loadPending()` runs **after** the period load, never in parallel: both read and
+write the same `statsMonths` map and two writers would each save it as it looked
+before the other answered. It runs once per open (↻ forces it) and fills in only
+its own card (`renderPending()` swaps `#tah-pending`), so the charts underneath
+are not rebuilt under the reader. `close()` bumps `view.pendingToken`;
+`loadBookings()`'s `isStale` predicate watches it per month and per detail
+request, so a closed view stops spending requests. `loadBookings()` takes an
+explicit `months` list and that `isStale` callback for exactly this — the pending
+load reuses the same month and detail caches.
+
+The card shares a row with the forecast (`pipelineRow`, `.tah-pipeline`: two
+equal columns, one below 900 px), and the row exists **only in the year view**,
+next to a forecast that is itself about a whole year. A week or month view has
+neither, which is also why `loadPending()` returns unless the period is `year`:
+nothing would be drawn, so nothing should be fetched.
+
+The forecast (year view only, like the pending card next to it) cuts the year
+into weeks. Completed whole weeks inside the year give the median weekly income;
+each remaining week is estimated at `max(booked in that week, median × remaining
+fraction)`, the band uses the same weeks' p25/p75, and fewer than three completed
+weeks fall back to the year's daily average. The cumulative chart's current-month
+point is the actual income; the dashed line starts there. A past year shows only
+"abgeschlossen", a future year only "geplant" — no forecast is invented for
+either.
 
 The commute and pause figures (`workload()`) answer what an hour is really worth
 once the day is spent at the museum, not just during the tour. A workday is one

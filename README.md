@@ -265,8 +265,14 @@ one period back or forward. Below that:
 - **Einnahmen, Einsätze, Ø pro Einsatz, Arbeitszeit** — the headline numbers,
   with the Ausfallhonorar of group cancellations called out separately.
 - **Teilnehmende, Absagen, Einsätze pro Woche, Absagequote** — the smaller row.
-- **Prognose zum 31.12.** (year view) — what the year will most likely end at,
-  with a range and how much of it is already booked.
+- **Noch ausstehend** and **Prognose zum 31.12.** (year view) — two cards side by
+  side. *Noch ausstehend* is the money already booked but not yet earned: every
+  confirmed tour from today on, up to a year ahead, with the number of tours and
+  workdays, the next tour and how it splits over the months. It ignores the year
+  on screen (it is always "from today"), and group cancellations are not counted
+  — their Ausfallhonorar is income, but the tour is not going to happen.
+  *Prognose* is what the year will most likely end at, with a range and how much
+  of it is already booked.
 - **Effektiver Stundensatz, Wartezeit, Ø Pause je Arbeitstag, Effizienz** — what
   an hour really pays once the pause between two tours and the ride to the
   museum are counted, not just the tour time.
