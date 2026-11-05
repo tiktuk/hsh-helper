@@ -418,6 +418,18 @@ var TAH_STATS = (function () {
       // otherwise give a negative pause; the tours themselves are the floor.
       const span = Math.max(work, last - first);
       const gap = span - work;
+      // The pause between two tours, as one stretch: three tours leave two of
+      // them, and "1,8 h" for a 09:55–17:00 day reads as one long hole when it
+      // is really the sum. Overlapping rows push the cursor instead of opening
+      // a negative pause.
+      const breaks = [];
+      let cursor = null;
+      for (const item of [...timed].sort((a, b) => a.start - b.start)) {
+        if (cursor !== null && item.start > cursor) {
+          breaks.push({ start: cursor, end: item.start, minutes: item.start - cursor });
+        }
+        cursor = cursor === null ? item.end : Math.max(cursor, item.end);
+      }
       const away = span + commute + prep;
       const income = rows.reduce((total, row) => total + (Number(row.price) || 0), 0);
       return {
@@ -428,6 +440,7 @@ var TAH_STATS = (function () {
         work,
         span,
         gap,
+        breaks,
         commute,
         prep,
         away,
@@ -441,7 +454,12 @@ var TAH_STATS = (function () {
     const gap = total('gap');
     const away = total('away');
     const income = total('income');
-    const longest = days.reduce((best, day) => (!best || day.gap > best.gap ? day : best), null);
+    const longest = days.reduce((best, day) => {
+      const top = day.breaks.reduce((max, item) => (!max || item.minutes > max.minutes ? item : max), null);
+      if (!top) return best;
+      const candidate = { date: day.date, ...top };
+      return !best || candidate.minutes > best.minutes ? candidate : best;
+    }, null);
     const multi = days.filter((day) => day.rows.length > 1);
     const count = (band) => days.filter((day) => day.band === band).length;
     const paidRate = work ? income / (work / 60) : 0;
@@ -455,6 +473,7 @@ var TAH_STATS = (function () {
       limit,
       km,
       gap,
+      whPerKm,
       commuteTotal: days.length * commute,
       kmTotal,
       kwh,
@@ -466,7 +485,7 @@ var TAH_STATS = (function () {
       efficient: count('efficient'),
       medium: count('medium'),
       long: count('long'),
-      longest: longest && longest.gap > 0 ? longest : null,
+      longest: longest && longest.minutes > 0 ? longest : null,
       multi,
       chart: workloadTimeline(period, range, days),
     };
@@ -1439,7 +1458,11 @@ var TAH_STATS = (function () {
             ? `davon ${wl.long} über ${wl.limit * 2} min`
             : `über ${wl.limit} min`
       ),
-      kpi(wl.longest ? hours(wl.longest.gap) : '–', 'Längste Pause', wl.longest ? dayLabel(wl.longest.date) : 'keine'),
+      kpi(
+        wl.longest ? hours(wl.longest.minutes) : '–',
+        'Längste Pause',
+        wl.longest ? `${dayLabel(wl.longest.date)}, ${clock(wl.longest.start)}–${clock(wl.longest.end)}` : 'keine'
+      ),
       kpi(
         String(wl.multi.length),
         'Tage mit 2+ Einsätzen',
@@ -1629,7 +1652,7 @@ var TAH_STATS = (function () {
       if (wl.gap) out.push(`Wartezeit zwischen Einsätzen: ${hours(wl.gap)} — das entspricht ${T.formatMoney(wl.lost)} Honorar`);
       if (wl.longest) {
         out.push(
-          `Längste Pause: ${hours(wl.longest.gap)} am ${dayLabel(wl.longest.date)} (${clock(wl.longest.first)}–${clock(wl.longest.last)})`
+          `Längste Pause: ${hours(wl.longest.minutes)} am ${dayLabel(wl.longest.date)} (${clock(wl.longest.start)}–${clock(wl.longest.end)})`
         );
       }
       if (wl.km) out.push(`Arbeitsweg: ${Math.round(wl.kmTotal)} km und ${hours(wl.commuteTotal)} Fahrzeit bei ${wl.km} km einfacher Strecke`);

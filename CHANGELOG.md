@@ -32,6 +32,14 @@ started; from 1.3.0 on, each release is written when it is cut.
 - A calendar feed that fails keeps its last copy and says so, instead of
   blanking the overlay for every calendar.
 
+### Fixed
+
+- **Längste Pause** printed the day's total waiting time next to the whole
+  workday, so a 09:55–17:00 day with three tours read "1,8 h (09:55–17:00)". It
+  is the longest single stretch between two tours now, with its own window.
+- The electricity line in **Auffälligkeiten** said "undefined Wh/km"; the
+  assumption never reached the figures.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added
