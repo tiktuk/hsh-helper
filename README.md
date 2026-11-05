@@ -45,7 +45,9 @@ and talks to the site with your existing login session.
 ## Update
 
 Chrome does not update an unpacked extension by itself, so a new version only
-arrives when you fetch it and reload the extension. How you fetch it depends on
+arrives when you fetch it and reload the extension. What changed between your
+copy and the new one is in [CHANGELOG.md](CHANGELOG.md); the version on the
+extension's card tells you which one you have. How you fetch it depends on
 how you installed it: **`git pull` only works if you cloned the repository.** If
 you used **Download ZIP**, that folder is not a git repository and git will just
 say `not a git repository`.
@@ -260,7 +262,12 @@ and shows what the bookings add up to — no extra permissions, it reads the sam
 booking list and Abrechnung amounts the invoice uses.
 
 At the top you switch between **Woche**, **Monat** and **Jahr**; the arrows move
-one period back or forward. Below that:
+one period back or forward. Across the header runs a **Jahresübersicht**: one
+small square per day of the year, as dark as the day was busy, with a red mark
+when a booking of that day was cancelled. Hovering a square names the tours of
+that day, its income and any Ausfallhonorar; a click opens that day's week, a
+click on a month name opens the month. The line under the row marks the period
+on screen, the small dark tick today. Below that:
 
 - **Einnahmen, Einsätze, Ø pro Einsatz, Arbeitszeit** — the headline numbers,
   with the Ausfallhonorar of group cancellations called out separately.

@@ -20,6 +20,7 @@ var TAH_STATS = (function () {
     ['year', 'Jahr'],
   ];
   const WEEKDAY_SHORT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  const WEEKDAY_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
   const MONTH_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
   const PALETTE = ['#1e4b8c', '#4caf50', '#a1887f', '#f0a30a', '#7e57c2', '#26a69a', '#90a4ae'];
 
@@ -55,6 +56,10 @@ var TAH_STATS = (function () {
   // quota). The view only ever reads it.
   const BIKE_DEFAULT = 'assets/bike.jpg';
 
+  // The year strip paints a day with 0…STRIP_MAX tours; everything above the
+  // last bucket shares its colour, so four tours is as dark as it gets.
+  const STRIP_MAX = 4;
+
   const view = {
     period: 'month',
     anchor: iso(new Date()),
@@ -65,6 +70,9 @@ var TAH_STATS = (function () {
     data: null,
     pending: null,
     pendingToken: 0,
+    strip: null,
+    stripToken: 0,
+    stripNodes: new Map(),
     commute: { ...COMMUTE_DEFAULTS },
     bikePhoto: '',
     charts: {},
@@ -255,6 +263,10 @@ var TAH_STATS = (function () {
       });
     }
 
+    // A view that was closed or a period that was stepped away from while the
+    // details were still coming in must not save its older snapshot of the
+    // shared caches over whatever the newer load has already written.
+    if (isStale()) return null;
     if (listDirty || detailDirty) {
       for (const [id, detail] of Object.entries(detailCache)) {
         if (Date.now() - detail.fetchedAt > DETAIL_MAX_AGE) delete detailCache[id];
@@ -785,14 +797,22 @@ var TAH_STATS = (function () {
 
   function onResize() {
     const root = document.querySelector('#tah-stats');
-    if (root) position(root);
+    if (!root) return;
+    position(root);
+    // The strip's columns are fractional, so every square moves with the width.
+    paintStripMarkers();
   }
 
   function onKey(event) {
-    if (event.key === 'Escape' && view.open) {
-      event.preventDefault();
-      close();
+    if (event.key !== 'Escape' || !view.open) return;
+    // Escape first dismisses the strip's tooltip, like any other popover.
+    const tip = document.querySelector('#tah-strip-tip.tah-strip-tip-on');
+    event.preventDefault();
+    if (tip) {
+      hideStripTip();
+      return;
     }
+    close();
   }
 
   function buildRoot() {
@@ -831,6 +851,7 @@ var TAH_STATS = (function () {
 
     head.append(tools);
     head.append(el('span', { id: 'tah-stats-progress', class: 'tah-stats-progress' }));
+    head.append(el('div', { id: 'tah-yearstrip', class: 'tah-yearstrip' }));
 
     root.append(head, el('div', { id: 'tah-stats-body', class: 'tah-stats-body' }));
     return root;
@@ -841,6 +862,9 @@ var TAH_STATS = (function () {
     const root = buildRoot();
     document.body.append(root);
     view.open = true;
+    // The view is the scroll container; a tooltip pinned to the viewport would
+    // stay behind when the strip scrolls away.
+    root.addEventListener('scroll', hideStripTip, { passive: true });
     // Always recomputed on open: the figure starts at "today", so a view that
     // sat in a background tab overnight must not keep yesterday's answer.
     view.pending = null;
@@ -854,6 +878,7 @@ var TAH_STATS = (function () {
     view.observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     document.addEventListener('keydown', onKey, true);
     document.querySelector('#tah-stats-period').textContent = rangeFor(view.period, view.anchor).label;
+    renderStrip();
     load();
     return true;
   }
@@ -868,6 +893,9 @@ var TAH_STATS = (function () {
     // A pending load that is still walking the upcoming months stops here.
     view.pendingToken += 1;
     view.pending = null;
+    // Same for the year strip, which may still be reading a year of months.
+    view.stripToken += 1;
+    view.stripNodes = new Map();
     document.body.classList.remove('tah-stats-open');
     markNav(false);
     window.removeEventListener('resize', onResize);
@@ -881,10 +909,12 @@ var TAH_STATS = (function () {
     return view.open ? close() : open();
   }
 
-  function setPeriod(period) {
+  // `anchor` is optional: the segmented control always starts at today, while a
+  // click on the year strip opens the week (or month) that was clicked.
+  function setPeriod(period, anchor = iso(new Date())) {
     if (!PERIODS.some(([value]) => value === period)) return;
     view.period = period;
-    view.anchor = iso(new Date());
+    view.anchor = anchor;
     document.querySelectorAll('#tah-stats .tah-seg').forEach((seg) => {
       seg.classList.toggle('tah-seg-on', seg.dataset.period === period);
     });
@@ -1011,6 +1041,296 @@ var TAH_STATS = (function () {
     const row = el('div', { class: 'tah-pipeline' });
     row.append(pendingCard(view.pending), forecastCard(view.data.forecast, yearOf(view.data.range)));
     return row;
+  }
+
+  /* ---------- year strip ---------- */
+
+  // One square per day of the anchor's year, in the header: the one figure that
+  // is not about the period on screen. A week view still wants to know whether
+  // this is a busy or a quiet stretch of the year, and a month view where its
+  // good weeks sit. Only billable rows count, exactly like the KPIs above (see
+  // aggregate) — a booking without an amount is not work.
+  //
+  // The year is loaded once and shares `statsMonths` / `bookingDetails` with the
+  // year view, so the second look is free. It runs after the period load, never
+  // beside it: both read and write the same month cache.
+  function stripDays(bookings) {
+    const days = new Map();
+    for (const row of bookings) {
+      if (!(row.price > 0)) continue;
+      const entry = days.get(row.date) || { tours: [], cancellations: [] };
+      (row.cancelled ? entry.cancellations : entry.tours).push(row);
+      days.set(row.date, entry);
+    }
+    const byStart = (a, b) => String(a.time).localeCompare(String(b.time));
+    for (const entry of days.values()) {
+      entry.tours.sort(byStart);
+      entry.cancellations.sort(byStart);
+    }
+    return days;
+  }
+
+  const stripIncome = (rows) => rows.reduce((total, row) => total + (Number(row.price) || 0), 0);
+
+  function stripSummary(strip) {
+    if (!strip) return '';
+    if (strip.error) return 'Jahresübersicht nicht verfügbar';
+    if (!strip.days) return strip.loading ? 'lade Jahresübersicht …' : '';
+    const entries = [...strip.days.values()];
+    const tours = entries.reduce((total, entry) => total + entry.tours.length, 0);
+    const cancels = entries.reduce((total, entry) => total + entry.cancellations.length, 0);
+    const workdays = entries.filter((entry) => entry.tours.length).length;
+    const parts = [
+      `${tours} ${tours === 1 ? 'Einsatz' : 'Einsätze'}`,
+      `${workdays} ${workdays === 1 ? 'Arbeitstag' : 'Arbeitstage'}`,
+      cancels ? `${cancels} ${cancels === 1 ? 'Absage' : 'Absagen'}` : '',
+      strip.loading ? 'lädt …' : '',
+      strip.failed ? `${strip.failed} nicht geladen` : '',
+    ];
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function stripLegend() {
+    const legend = el('span', { class: 'tah-strip-legend' });
+    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Einsätze' }));
+    for (let level = 0; level <= STRIP_MAX; level += 1) {
+      legend.append(el('i', { class: `tah-strip-swatch tah-day-n${level}`, title: `${level === STRIP_MAX ? `${level}+` : level}` }));
+    }
+    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Absage' }));
+    legend.append(el('i', { class: 'tah-strip-swatch tah-day-n2 tah-day-cancel', title: 'Absage' }));
+    return legend;
+  }
+
+  function stripAria(key, entry) {
+    if (!entry) return `${dayLabel(key)}: keine Buchung`;
+    const parts = [];
+    if (entry.tours.length) parts.push(`${entry.tours.length} ${entry.tours.length === 1 ? 'Einsatz' : 'Einsätze'}`);
+    if (entry.cancellations.length) {
+      parts.push(`${entry.cancellations.length} ${entry.cancellations.length === 1 ? 'Absage' : 'Absagen'}`);
+    }
+    return `${dayLabel(key)}: ${parts.join(', ')}`;
+  }
+
+  function stripTipLines(key, entry, loading) {
+    const date = fromIso(key);
+    const lines = [
+      el('strong', { text: `${WEEKDAY_LONG[(date.getDay() + 6) % 7]}, ${key.split('-').reverse().join('.')}` }),
+    ];
+    if (!entry) {
+      // While the year is still loading an empty square means "not loaded yet",
+      // not "no booking" — the strip is drawn before its data is.
+      const text = loading ? 'lädt …' : key === iso(new Date()) ? 'heute · keine Buchung' : 'keine Buchung';
+      lines.push(el('span', { text }));
+    } else {
+      if (entry.tours.length) {
+        lines.push(
+          el('span', {
+            text: `${entry.tours.length} ${entry.tours.length === 1 ? 'Einsatz' : 'Einsätze'} · ${T.formatMoney(stripIncome(entry.tours))}`,
+          })
+        );
+        // A day rarely holds more than three tours; the rest is a count.
+        for (const row of entry.tours.slice(0, 3)) {
+          lines.push(el('span', { class: 'tah-strip-tip-row', text: `${row.time} ${row.offer || row.tour || ''}`.trim() }));
+        }
+        if (entry.tours.length > 3) {
+          lines.push(el('span', { class: 'tah-strip-tip-row', text: `+${entry.tours.length - 3} weitere` }));
+        }
+      }
+      if (entry.cancellations.length) {
+        const count = entry.cancellations.length;
+        lines.push(
+          el('span', {
+            class: 'tah-strip-tip-cancel',
+            text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} · ${T.formatMoney(stripIncome(entry.cancellations))} Ausfallhonorar`,
+          })
+        );
+      }
+    }
+    lines.push(el('span', { class: 'tah-strip-tip-hint', text: 'Klick öffnet die Woche' }));
+    return lines;
+  }
+
+  function hideStripTip() {
+    const tip = document.querySelector('#tah-strip-tip');
+    if (tip) tip.classList.remove('tah-strip-tip-on');
+  }
+
+  // Fixed, not absolute: the squares live in a horizontally scrolling grid, and
+  // an absolutely positioned tooltip would be clipped by it. Coordinates are
+  // read from the square itself and clamped to the window.
+  function showStripTip(square) {
+    const tip = document.querySelector('#tah-strip-tip');
+    if (!tip) return;
+    const key = square.dataset.date;
+    // Moving the pointer inside one square fires `pointerover` again; the tip is
+    // already right where it belongs then.
+    if (tip.dataset.date === key && tip.classList.contains('tah-strip-tip-on')) return;
+    const entry = (view.strip && view.strip.days && view.strip.days.get(key)) || null;
+    tip.replaceChildren(...stripTipLines(key, entry, Boolean(view.strip && view.strip.loading)));
+    tip.dataset.date = key;
+    tip.classList.add('tah-strip-tip-on');
+    const rect = square.getBoundingClientRect();
+    const left = Math.max(6, Math.min(rect.left + rect.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 6));
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(rect.bottom + 7)}px`;
+  }
+
+  // 366 squares in one row: a square is a few pixels wide, so the colour has to
+  // carry the count and the red bar the cancellation. Days outside the year on
+  // screen do not exist in this grid at all.
+  function stripGrid(year, days) {
+    const start = new Date(year, 0, 1);
+    const count = daysBetween(start, new Date(year + 1, 0, 1));
+    const columns = `repeat(${count}, minmax(2px, 1fr))`;
+    const nodes = new Map();
+
+    const row = el('div', { id: 'tah-strip-days', class: 'tah-strip-days' });
+    row.style.gridTemplateColumns = columns;
+    for (let index = 0; index < count; index += 1) {
+      const key = iso(addDays(start, index));
+      const entry = (days && days.get(key)) || null;
+      const level = entry ? Math.min(STRIP_MAX, entry.tours.length) : 0;
+      const classes = ['tah-day', `tah-day-n${level}`];
+      if (entry && entry.cancellations.length) classes.push('tah-day-cancel');
+      const square = el('button', { class: classes.join(' '), type: 'button', 'data-date': key, tabindex: '-1' });
+      square.setAttribute('aria-label', stripAria(key, entry));
+      nodes.set(key, square);
+      row.append(square);
+    }
+
+    row.addEventListener('click', (event) => {
+      const square = event.target.closest('.tah-day');
+      if (square && square.dataset.date) setPeriod('week', square.dataset.date);
+    });
+    row.addEventListener('pointerover', (event) => {
+      const square = event.target.closest('.tah-day');
+      if (square && square.dataset.date) showStripTip(square);
+    });
+    row.addEventListener('pointerleave', hideStripTip);
+
+    // Same column template as the squares, so a label sits exactly over its
+    // month even though the months have different lengths.
+    const months = el('div', { id: 'tah-strip-months', class: 'tah-strip-months' });
+    months.style.gridTemplateColumns = columns;
+    for (let month = 0; month < 12; month += 1) {
+      const first = new Date(year, month, 1);
+      const length = new Date(year, month + 1, 0).getDate();
+      const label = el('button', {
+        class: 'tah-strip-month',
+        type: 'button',
+        text: MONTH_SHORT[month],
+        title: `${T.monthLabel(`${year}-${pad(month + 1)}`)} öffnen`,
+      });
+      label.style.gridColumn = `${daysBetween(start, first) + 1} / span ${length}`;
+      label.addEventListener('click', () => setPeriod('month', iso(first)));
+      months.append(label);
+    }
+
+    const inner = el('div', { class: 'tah-strip-inner' });
+    inner.append(
+      el('div', { id: 'tah-strip-band', class: 'tah-strip-band' }),
+      el('div', { id: 'tah-strip-today', class: 'tah-strip-today' }),
+      row,
+      months
+    );
+    const scroll = el('div', { class: 'tah-strip-scroll' });
+    scroll.append(inner);
+    scroll.addEventListener('scroll', hideStripTip, { passive: true });
+    return { scroll, nodes };
+  }
+
+  // The period on screen, drawn under the row: a week is 7 columns wide and
+  // without it the reader cannot tell which squares the figures belong to. A
+  // whole year needs no marker, so the band is hidden then. Today gets a dark
+  // tick on the same line, so "now" and "what I am looking at" stay apart.
+  function paintStripMarkers() {
+    const band = document.querySelector('#tah-strip-band');
+    if (!band) return;
+    const nodes = view.stripNodes;
+
+    const tick = document.querySelector('#tah-strip-today');
+    const today = nodes.get(iso(new Date()));
+    if (tick) {
+      tick.hidden = !today;
+      if (today) {
+        tick.style.left = `${today.offsetLeft}px`;
+        tick.style.width = `${today.offsetWidth}px`;
+      }
+    }
+
+    const range = view.data && view.data.range;
+    const strip = view.strip;
+    const year = strip ? strip.year : Number(view.anchor.slice(0, 4));
+    if (!range || !nodes.size || (range.from === `${year}-01-01` && range.to === `${year}-12-31`)) {
+      band.hidden = true;
+      return;
+    }
+    let first = null;
+    let last = null;
+    for (const [key, node] of nodes) {
+      if (key < range.from || key > range.to) continue;
+      if (!first) first = node;
+      last = node;
+    }
+    band.hidden = !first;
+    if (!first) return;
+    band.style.left = `${first.offsetLeft}px`;
+    band.style.width = `${last.offsetLeft + last.offsetWidth - first.offsetLeft}px`;
+  }
+
+  function renderStrip() {
+    const box = document.querySelector('#tah-yearstrip');
+    if (!box) return;
+    hideStripTip();
+    const year = Number(view.anchor.slice(0, 4));
+    const strip = view.strip && view.strip.year === year ? view.strip : null;
+    const keep = box.querySelector('.tah-strip-scroll')?.scrollLeft || 0;
+    const { scroll, nodes } = stripGrid(year, strip ? strip.days : null);
+    view.stripNodes = nodes;
+
+    const head = el('div', { class: 'tah-strip-head' });
+    head.append(el('span', { class: 'tah-strip-title', text: `Jahresübersicht ${year}` }));
+    head.append(el('span', { class: 'tah-strip-summary', text: stripSummary(strip) }));
+    head.append(stripLegend());
+
+    box.replaceChildren(head, scroll, el('div', { id: 'tah-strip-tip', class: 'tah-strip-tip' }));
+    scroll.scrollLeft = keep;
+    paintStripMarkers();
+  }
+
+  // The year view has already loaded exactly this year, so the strip is derived
+  // from what is on screen instead of asking for the same months twice.
+  function useStripFromData() {
+    view.stripToken += 1;
+    view.strip = { year: yearOf(view.data.range), days: stripDays(view.data.bookings), failed: view.data.failed };
+    renderStrip();
+  }
+
+  async function loadYearStrip({ force = false } = {}) {
+    if (!view.open) return;
+    const year = Number(view.anchor.slice(0, 4));
+    const token = ++view.stripToken;
+    // Keep the squares of the year that is already drawn while its reload runs:
+    // a month step inside the same year must not blink the whole strip.
+    const previous = view.strip && view.strip.year === year ? view.strip.days : null;
+    view.strip = { year, days: previous, loading: true };
+    renderStrip();
+
+    const range = { from: `${year}-01-01`, to: `${year}-12-31` };
+    try {
+      const result = await loadBookings(range, {
+        force,
+        isStale: () => token !== view.stripToken,
+        months: monthsInRange(range.from, range.to),
+        progressLabel: 'Lade Jahresübersicht',
+      });
+      if (!result || token !== view.stripToken) return;
+      view.strip = { year, days: stripDays(result.bookings), failed: result.failed };
+    } catch (err) {
+      if (token !== view.stripToken) return;
+      view.strip = { year, days: previous, error: err.message };
+    }
+    renderStrip();
   }
 
   /* ---------- commute & pauses ---------- */
@@ -1231,6 +1551,7 @@ var TAH_STATS = (function () {
     notes.push('Daten aus der Buchungsliste und den Abrechnungsbeträgen der Buchungsdetails. Zwischengespeichert, „↻“ lädt neu.');
     body.append(el('p', { class: 'tah-stats-note', text: notes.join(' ') }));
 
+    paintStripMarkers();
     drawCharts(view.data);
   }
 
@@ -1275,7 +1596,7 @@ var TAH_STATS = (function () {
 
     const bestDay = weekdays.counts.indexOf(Math.max(...weekdays.counts));
     if (weekdays.counts[bestDay] > 0) {
-      out.push(`Stärkster Wochentag: ${['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'][bestDay]} (${weekdays.counts[bestDay]} Einsätze)`);
+      out.push(`Stärkster Wochentag: ${WEEKDAY_LONG[bestDay]} (${weekdays.counts[bestDay]} Einsätze)`);
     }
     const bestTime = times.counts.indexOf(Math.max(...times.counts));
     if (times.counts[bestTime] > 0) out.push(`Häufigste Startzeit: ${times.labels[bestTime]} Uhr (${times.counts[bestTime]}×)`);
@@ -1679,9 +2000,16 @@ var TAH_STATS = (function () {
       view.loading = false;
       view.data = buildStats(result.bookings, range, result);
       render();
-      // Not awaited: the period is already on screen, the pipeline figure fills
-      // in on its own card.
-      loadPending({ force });
+      // Not awaited: the period is already on screen, the rest fills in on its
+      // own. A year view already holds its whole year, so the strip is derived
+      // from it; every other period asks for the year separately, after the
+      // period load has finished writing the month cache.
+      if (view.period === 'year') {
+        useStripFromData();
+        loadPending({ force });
+      } else {
+        loadYearStrip({ force });
+      }
     } catch (err) {
       if (token !== view.token) return;
       view.loading = false;

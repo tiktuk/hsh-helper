@@ -352,6 +352,33 @@ next to a forecast that is itself about a whole year. A week or month view has
 neither, which is also why `loadPending()` returns unless the period is `year`:
 nothing would be drawn, so nothing should be fetched.
 
+**Jahresübersicht** (`#tah-yearstrip`) is the one figure that is not about the
+period: a row of 365/366 squares in the sticky header, one per day of the
+anchor's year. Colour is the number of billable tours that day (`tah-day-n0…n4`,
+four and more share the darkest), a red bar along the square's bottom edge means
+at least one Absage (a day can have both), and a dark tick under the row marks
+today. Only rows with `price > 0` count, exactly like the KPIs, so the summary
+line always agrees with the year view. The squares are a few pixels wide because
+366 days have to fit one row; below ~1100 px the row scrolls horizontally
+(`minmax(2px, 1fr)` columns, month labels in a second grid with the same
+template). Hovering shows a tooltip with the day's tours, its income and its
+Ausfallhonorar — `position: fixed`, because the row is a scroll container and an
+absolute tooltip would be clipped; Escape closes it before it closes the view.
+Clicking a square opens that day's week and a month label that month, which is
+what the optional `anchor` on `setPeriod(period, anchor)` is for (the segmented
+control still starts at today). The band under the row marks the period on
+screen and is hidden in the year view, where it would span the whole row.
+
+The year view already holds its year, so the strip is derived from
+`view.data.bookings` (`useStripFromData`) and costs nothing. Every other period
+loads the year through `loadBookings` in `loadYearStrip()`, **after** the period
+load and never beside it — both write `statsMonths` — keeping the squares of the
+year already drawn while it reloads. That is a year of detail pages the first
+time a week or month is opened: the same first-look cost as the year view, and
+the caches make every later look free. `view.stripToken` stops the load on close
+or a period change, and `loadBookings()` no longer writes its caches once
+`isStale()` is true, so an abandoned year cannot overwrite a newer one.
+
 The forecast (year view only, like the pending card next to it) cuts the year
 into weeks. Completed whole weeks inside the year give the median weekly income;
 each remaining week is estimated at `max(booked in that week, median × remaining
@@ -459,6 +486,21 @@ under an icon is the flex gap; it is a progressive enhancement (Chrome 133+).
   Presets are static local times; that is a known limitation, not a bug.
 - The availability rules on the page are also authoritative: toggling a cell inside a rule's window
   makes the server snap it back. Do not assume a write "sticks" without reloading.
+
+## Versions and changelog
+
+`version` in `extension/manifest.json` and `CHANGELOG.md` move together, in the
+same commit as the change. SemVer: a new feature bumps the minor, a fix the
+patch, a rework the major — leave the version alone when nothing user-visible
+changed (docs, comments, a refactor). `chrome://extensions` shows that number on
+the extension's card, which is how an installed copy tells whether its **Update**
+actually arrived.
+
+A changelog entry is what the person using the extension reads, not a commit
+log: English, one bullet per change under `Added` / `Changed` / `Fixed`, the
+German UI name in bold where there is one (**Jahresübersicht**, **Ganze Woche
+verfügbar**), and a sentence about what it now does rather than which function
+moved. `## [1.3.0] - YYYY-MM-DD`, newest release first.
 
 ## Conventions
 

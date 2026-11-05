@@ -152,6 +152,212 @@ body.tah-stats-open {
   display: none;
 }
 
+/* ---------- year strip ---------- */
+
+/* One square per day of the year, in the sticky header, so the period on screen
+   always has its year around it. The squares are a few pixels wide by design:
+   the colour is the figure, the red bar is the cancellation. */
+#tah-stats .tah-yearstrip {
+  --strip-row: 18px;
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+#tah-stats .tah-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 10px;
+  margin-bottom: 4px;
+  color: #8a939d;
+  font-size: 11px;
+}
+
+#tah-stats .tah-strip-title {
+  color: #555;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#tah-stats .tah-strip-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+#tah-stats .tah-strip-legend-label {
+  margin-left: 6px;
+  color: #9aa3ad;
+  font-size: 10px;
+}
+
+#tah-stats .tah-strip-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+}
+
+#tah-stats .tah-strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+#tah-stats .tah-strip-inner {
+  position: relative;
+  min-width: 100%;
+}
+
+#tah-stats .tah-strip-days {
+  display: grid;
+  gap: 1px;
+  height: var(--strip-row);
+}
+
+#tah-stats .tah-day {
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: #e9edf2;
+  cursor: pointer;
+}
+
+#tah-stats .tah-day:hover {
+  filter: brightness(0.85);
+}
+
+#tah-stats .tah-day-n0 {
+  background: #e9edf2;
+}
+
+#tah-stats .tah-day-n1 {
+  background: #c3d4ea;
+}
+
+#tah-stats .tah-day-n2 {
+  background: #7e9fcd;
+}
+
+#tah-stats .tah-day-n3 {
+  background: #4a78b5;
+}
+
+#tah-stats .tah-day-n4 {
+  background: #1e4b8c;
+}
+
+/* A cancellation is a red bar under the square, not a different fill: a day can
+   have both tours and a cancellation, and the count stays the main figure. */
+#tah-stats .tah-day-cancel {
+  box-shadow: inset 0 -3px 0 #c0392b;
+}
+
+/* The period on screen, drawn under its days, and today on the same line. */
+#tah-stats .tah-strip-band,
+#tah-stats .tah-strip-today {
+  position: absolute;
+  top: calc(var(--strip-row) + 2px);
+  height: 2px;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+#tah-stats .tah-strip-band {
+  background: #1e4b8c;
+  opacity: 0.45;
+}
+
+#tah-stats .tah-strip-today {
+  background: #37474f;
+}
+
+#tah-stats .tah-strip-band[hidden],
+#tah-stats .tah-strip-today[hidden] {
+  display: none;
+}
+
+#tah-stats .tah-strip-months {
+  display: grid;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+#tah-stats .tah-strip-month {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #9aa3ad;
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#tah-stats .tah-strip-month:hover {
+  color: #1e4b8c;
+}
+
+/* Fixed and out of the flow: the squares scroll horizontally, an absolutely
+   positioned tooltip would be clipped by that scroll container. */
+#tah-stats .tah-strip-tip {
+  position: fixed;
+  z-index: 1100;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 320px;
+  padding: 7px 10px 8px;
+  border-radius: 3px;
+  background: #262f3a;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  color: #eef2f6;
+  font-size: 11.5px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+#tah-stats .tah-strip-tip-on {
+  display: flex;
+}
+
+#tah-stats .tah-strip-tip strong {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#tah-stats .tah-strip-tip span {
+  color: #cfd8e2;
+}
+
+#tah-stats .tah-strip-tip .tah-strip-tip-row {
+  max-width: 300px;
+  overflow: hidden;
+  color: #aebccb;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#tah-stats .tah-strip-tip .tah-strip-tip-cancel {
+  color: #ffb4a8;
+}
+
+#tah-stats .tah-strip-tip .tah-strip-tip-hint {
+  margin-top: 3px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: #8fa0b2;
+  font-size: 10.5px;
+}
+
 #tah-stats .tah-stats-body {
   max-width: 1180px;
   margin: 0 auto;
