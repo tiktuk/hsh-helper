@@ -406,11 +406,13 @@ including charging losses, not the battery's nominal capacity. A day is
 that, *long* beyond; the KPI grid reports the counts — eight equal cards, four
 per row, because a three-card row over a four-card row reads as two tables — and
 the workload chart stacks work, pause and commute per bucket. A day's `gap` is
-the sum of its pauses, which is what *Wartezeit* and *Ø Pause je Arbeitstag*
-print; **Längste Pause** is `longest`, one `breaks` entry — the longest single
-stretch between two tours, with its own window. Do not print a day's `gap` next
-to its first and last tour: three tours make 1,8 h out of a 09:55–17:00 day, and
-that reads as one seven-hour hole. The **bike card** in the right column
+the sum of its pauses, which is what *Wartezeit*, *Ø Pause je Arbeitstag* and
+*Längste Wartezeit an einem Tag* (`longestDay`) print; **Längste Pause** is
+`longest`, one `breaks` entry — the longest single stretch between two tours,
+with its own window. A day's `gap` may only be printed next to its first and
+last tour when the label says it is the day's total: three tours make 1,8 h out
+of a 09:55–17:00 day, and labelled "Längste Pause" that read as one seven-hour
+hole. The **bike card** in the right column
 of that block holds the photo, the period's kilometres and kWh/€ under it, and
 the assumptions it was calculated from. It is read-only: the settings have one
 place, the options page, and the view must not grow a second one.

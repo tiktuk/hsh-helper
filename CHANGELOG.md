@@ -36,7 +36,9 @@ started; from 1.3.0 on, each release is written when it is cut.
 
 - **Längste Pause** printed the day's total waiting time next to the whole
   workday, so a 09:55–17:00 day with three tours read "1,8 h (09:55–17:00)". It
-  is the longest single stretch between two tours now, with its own window.
+  is the longest single stretch between two tours now, with its own window, and
+  the day with the most waiting in total has its own line under
+  **Auffälligkeiten** (*Längste Wartezeit an einem Tag*).
 - The electricity line in **Auffälligkeiten** said "undefined Wh/km"; the
   assumption never reached the figures.
 

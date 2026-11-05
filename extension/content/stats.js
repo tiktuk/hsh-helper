@@ -460,6 +460,9 @@ var TAH_STATS = (function () {
       const candidate = { date: day.date, ...top };
       return !best || candidate.minutes > best.minutes ? candidate : best;
     }, null);
+    // The other half of the same question: which day spent the most time waiting
+    // in total, however it was split up.
+    const longestDay = days.reduce((best, day) => (!best || day.gap > best.gap ? day : best), null);
     const multi = days.filter((day) => day.rows.length > 1);
     const count = (band) => days.filter((day) => day.band === band).length;
     const paidRate = work ? income / (work / 60) : 0;
@@ -486,6 +489,7 @@ var TAH_STATS = (function () {
       medium: count('medium'),
       long: count('long'),
       longest: longest && longest.minutes > 0 ? longest : null,
+      longestDay: longestDay && longestDay.gap > 0 ? longestDay : null,
       multi,
       chart: workloadTimeline(period, range, days),
     };
@@ -1653,6 +1657,12 @@ var TAH_STATS = (function () {
       if (wl.longest) {
         out.push(
           `Längste Pause: ${hours(wl.longest.minutes)} am ${dayLabel(wl.longest.date)} (${clock(wl.longest.start)}–${clock(wl.longest.end)})`
+        );
+      }
+      if (wl.longestDay) {
+        const day = wl.longestDay;
+        out.push(
+          `Längste Wartezeit an einem Tag: ${hours(day.gap)} am ${dayLabel(day.date)} (${clock(day.first)}–${clock(day.last)}, ${day.rows.length} ${day.rows.length === 1 ? 'Einsatz' : 'Einsätze'})`
         );
       }
       if (wl.km) out.push(`Arbeitsweg: ${Math.round(wl.kmTotal)} km und ${hours(wl.commuteTotal)} Fahrzeit bei ${wl.km} km einfacher Strecke`);
