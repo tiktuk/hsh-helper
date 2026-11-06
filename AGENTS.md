@@ -371,15 +371,31 @@ the first), and a dark tick under the row marks today. Tours count only with
 `price > 0`, exactly like the KPIs; a cancelled row without an amount paints the
 amber bar and is not a tour. The squares are a few pixels wide because
 366 days have to fit one row; below ~1100 px the row scrolls horizontally
-(`minmax(2px, 1fr)` columns, month labels in a second grid with the same
-template). Hovering shows a tooltip with the day's tours, its income, its
-Ausfallhonorar and its own cancellations — `position: fixed`, because the row is
-a scroll container and an absolute tooltip would be clipped; Escape closes it
-before it closes the view.
-Clicking a square opens that day's week and a month label that month, which is
+(`minmax(2px, 1fr)` columns). Hovering shows a tooltip with the day's tours, its
+income, its Ausfallhonorar and its own cancellations — `position: fixed`, because
+the row is a scroll container and an absolute tooltip would be clipped; Escape
+closes it before it closes the view.
+Clicking a square opens that day's week and a month cell that month, which is
 what the optional `anchor` on `setPeriod(period, anchor)` is for (the segmented
 control still starts at today). The band under the row marks the period on
 screen and is hidden in the year view, where it would span the whole row.
+
+The row under the squares (`#tah-strip-months`, `monthStats()`) is the same year
+one step coarser: one cell per month, in a grid with the squares' column
+template, spanning its own days. It replaced the plain month labels — the month
+name lives in the cell, because the cell carries the figures anyway: the income
+(tours plus Ausfallhonorar, exactly `aggregate()`'s `income`), the number of
+tours on the right of the name, and the same `tah-day-n0…n4` fill as the squares,
+so the strip stays one heatmap. The level is the month's income within the
+year's own range — the weakest month on the year gets the lightest fill, the best
+the darkest — and **not** its share of zero: a steady year would otherwise be
+twelve identical squares, and the row answers "which months carried the year".
+A month without a booking is `n0` with a dash, never "0 €", and a year that has
+not answered yet says "…" (`loaded` on each stat). Hovering opens the same
+tooltip with the month's income, tours, workdays and cancellations; clicking
+opens the month. Both `view.stripMonths` (the 12 stats, keyed by `YYYY-MM`) and
+`view.stripNodes` are rebuilt by `renderStrip()`, and the tooltip reads the map
+rather than recomputing, so it can never disagree with the cell it sits on.
 
 The year view already holds its year, so the strip is derived from
 `view.data.bookings` (`useStripFromData`) and costs nothing. Every other period

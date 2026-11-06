@@ -9,6 +9,17 @@ same number on the extension's card.
 Entries up to 1.2.0 were reconstructed from the git history when this file was
 started; from 1.3.0 on, each release is written when it is cut.
 
+## [Unreleased]
+
+### Added
+
+- **Jahresübersicht** gets a month row: under the squares, one cell per month
+  with its name, its income and its number of tours, filled in the same colours
+  as the day squares — the weakest month of the year lightest, the best darkest.
+  Hovering shows the month's income, tours, workdays and cancellations; a click
+  still opens the month. The plain month labels are gone, the names live in the
+  cells now.
+
 ## [1.3.0] - 2026-11-04
 
 ### Added

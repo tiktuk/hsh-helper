@@ -73,6 +73,7 @@ var TAH_STATS = (function () {
     strip: null,
     stripToken: 0,
     stripNodes: new Map(),
+    stripMonths: new Map(),
     commute: { ...COMMUTE_DEFAULTS },
     bikePhoto: '',
     charts: {},
@@ -930,6 +931,7 @@ var TAH_STATS = (function () {
     // Same for the year strip, which may still be reading a year of months.
     view.stripToken += 1;
     view.stripNodes = new Map();
+    view.stripMonths = new Map();
     document.body.classList.remove('tah-stats-open');
     markNav(false);
     window.removeEventListener('resize', onResize);
@@ -1114,6 +1116,63 @@ var TAH_STATS = (function () {
 
   const stripIncome = (rows) => rows.reduce((total, row) => total + (Number(row.price) || 0), 0);
 
+  // The month row under the squares is the same year one step coarser, and the
+  // figure a month is asked for is the money. Income is what `aggregate()`
+  // counts — tours plus the Ausfallhonorar of the group's cancellations — and a
+  // month without either is "nothing", not "0 €": the strip cannot tell a quiet
+  // month from one whose detail pages failed to load.
+  function monthStats(year, days) {
+    const months = Array.from({ length: 12 }, (_, month) => ({
+      key: `${year}-${pad(month + 1)}`,
+      month,
+      // A year that has not answered yet has no quiet months either.
+      loaded: Boolean(days),
+      income: 0,
+      tours: 0,
+      workdays: 0,
+      cancellations: 0,
+      own: 0,
+    }));
+    if (days) {
+      for (const [key, entry] of days) {
+        const stat = months[Number(key.slice(5, 7)) - 1];
+        if (!stat) continue;
+        stat.income += stripIncome(entry.tours) + stripIncome(entry.cancellations);
+        stat.tours += entry.tours.length;
+        stat.cancellations += entry.cancellations.length;
+        stat.own += entry.own.length;
+        if (entry.tours.length) stat.workdays += 1;
+      }
+    }
+    // Relative to the year's own range, not to zero: a guide with a steady year
+    // would otherwise get twelve identical squares, and the question the row
+    // answers is "which months carried the year". A month at the year's floor is
+    // the lightest, the best month the darkest; a month without a booking is
+    // empty, not "the weakest".
+    const earned = months.filter((stat) => stat.income > 0);
+    const best = earned.reduce((top, stat) => Math.max(top, stat.income), 0);
+    const worst = earned.reduce((low, stat) => Math.min(low, stat.income), Infinity);
+    for (const stat of months) {
+      if (stat.income <= 0) stat.level = 0;
+      else if (best === worst) stat.level = STRIP_MAX;
+      else stat.level = 1 + Math.round(((stat.income - worst) / (best - worst)) * (STRIP_MAX - 1));
+    }
+    return months;
+  }
+
+  function stripMonthAria(stat) {
+    const parts = [T.monthLabel(stat.key)];
+    if (!stat.loaded) {
+      parts.push('lädt');
+    } else if (stat.tours || stat.cancellations || stat.own) {
+      parts.push(`${stat.tours} ${stat.tours === 1 ? 'Einsatz' : 'Einsätze'}`);
+      if (stat.income) parts.push(moneyShort(stat.income));
+    } else {
+      parts.push('keine Buchung');
+    }
+    return parts.join(', ');
+  }
+
   function stripSummary(strip) {
     if (!strip) return '';
     if (strip.error) return 'Jahresübersicht nicht verfügbar';
@@ -1123,9 +1182,11 @@ var TAH_STATS = (function () {
     const cancels = entries.reduce((total, entry) => total + entry.cancellations.length, 0);
     const own = entries.reduce((total, entry) => total + entry.own.length, 0);
     const workdays = entries.filter((entry) => entry.tours.length).length;
+    const income = entries.reduce((total, entry) => total + stripIncome(entry.tours) + stripIncome(entry.cancellations), 0);
     const parts = [
       `${tours} ${tours === 1 ? 'Einsatz' : 'Einsätze'}`,
       `${workdays} ${workdays === 1 ? 'Arbeitstag' : 'Arbeitstage'}`,
+      income ? `${moneyShort(income)} Einnahmen` : '',
       cancels ? `${cancels} ${cancels === 1 ? 'Absage' : 'Absagen'} der Kundschaft` : '',
       own ? `${own} ${own === 1 ? 'Absage' : 'Absagen'} durch dich` : '',
       strip.loading ? 'lädt …' : '',
@@ -1144,6 +1205,14 @@ var TAH_STATS = (function () {
     legend.append(el('i', { class: 'tah-strip-swatch tah-day-n2 tah-day-cancel', title: 'Absage durch die Kundschaft' }));
     legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Absage (durch dich)' }));
     legend.append(el('i', { class: 'tah-strip-swatch tah-day-n0 tah-day-own', title: 'Absage durch dich' }));
+    // The month row reuses the day squares' ramp — one heatmap, one scale — so
+    // the label is what tells the two rows apart, not the hue.
+    legend.append(el('span', { class: 'tah-strip-legend-sep' }));
+    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Einnahmen je Monat' }));
+    const words = ['keine Einnahmen', 'schwacher Monat', 'mittlerer Monat', 'starker Monat', 'stärkster Monat'];
+    for (let level = 0; level <= STRIP_MAX; level += 1) {
+      legend.append(el('i', { class: `tah-strip-swatch tah-day-n${level}`, title: words[level] }));
+    }
     return legend;
   }
 
@@ -1206,6 +1275,38 @@ var TAH_STATS = (function () {
     return lines;
   }
 
+  // The month cells carry two figures at most; the tooltip is where the rest of
+  // the month is allowed to live.
+  function stripMonthTipLines(stat) {
+    const lines = [el('strong', { text: T.monthLabel(stat.key) })];
+    if (!stat.loaded) {
+      lines.push(el('span', { text: 'lädt …' }));
+    } else if (!stat.tours && !stat.cancellations && !stat.own) {
+      lines.push(el('span', { text: 'keine Buchung' }));
+    } else {
+      if (stat.income) lines.push(el('span', { text: `${moneyShort(stat.income)} Einnahmen` }));
+      if (stat.tours) {
+        lines.push(
+          el('span', {
+            text: `${stat.tours} ${stat.tours === 1 ? 'Einsatz' : 'Einsätze'} an ${stat.workdays} ${
+              stat.workdays === 1 ? 'Arbeitstag' : 'Arbeitstagen'
+            }`,
+          })
+        );
+      }
+      if (stat.cancellations) {
+        const count = stat.cancellations;
+        lines.push(el('span', { class: 'tah-strip-tip-cancel', text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} der Kundschaft` }));
+      }
+      if (stat.own) {
+        const count = stat.own;
+        lines.push(el('span', { class: 'tah-strip-tip-own', text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} durch dich · ohne Honorar` }));
+      }
+    }
+    lines.push(el('span', { class: 'tah-strip-tip-hint', text: 'Klick öffnet den Monat' }));
+    return lines;
+  }
+
   function hideStripTip() {
     const tip = document.querySelector('#tah-strip-tip');
     if (tip) tip.classList.remove('tah-strip-tip-on');
@@ -1214,18 +1315,34 @@ var TAH_STATS = (function () {
   // Fixed, not absolute: the squares live in a horizontally scrolling grid, and
   // an absolutely positioned tooltip would be clipped by it. Coordinates are
   // read from the square itself and clamped to the window.
-  function showStripTip(square) {
+  function showStripTip(cell) {
     const tip = document.querySelector('#tah-strip-tip');
     if (!tip) return;
-    const key = square.dataset.date;
-    // Moving the pointer inside one square fires `pointerover` again; the tip is
+    const month = cell.dataset.month;
+    const key = month || cell.dataset.date;
+    // Moving the pointer inside one cell fires `pointerover` again; the tip is
     // already right where it belongs then.
-    if (tip.dataset.date === key && tip.classList.contains('tah-strip-tip-on')) return;
-    const entry = (view.strip && view.strip.days && view.strip.days.get(key)) || null;
-    tip.replaceChildren(...stripTipLines(key, entry, Boolean(view.strip && view.strip.loading)));
-    tip.dataset.date = key;
+    if (tip.dataset.key === key && tip.classList.contains('tah-strip-tip-on')) return;
+    let lines;
+    if (month) {
+      const stat = (view.stripMonths && view.stripMonths.get(month)) || {
+        key: month,
+        loaded: false,
+        income: 0,
+        tours: 0,
+        workdays: 0,
+        cancellations: 0,
+        own: 0,
+      };
+      lines = stripMonthTipLines(stat);
+    } else {
+      const loading = Boolean(view.strip && view.strip.loading);
+      lines = stripTipLines(key, (view.strip && view.strip.days && view.strip.days.get(key)) || null, loading);
+    }
+    tip.replaceChildren(...lines);
+    tip.dataset.key = key;
     tip.classList.add('tah-strip-tip-on');
-    const rect = square.getBoundingClientRect();
+    const rect = cell.getBoundingClientRect();
     const left = Math.max(6, Math.min(rect.left + rect.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 6));
     tip.style.left = `${Math.round(left)}px`;
     tip.style.top = `${Math.round(rect.bottom + 7)}px`;
@@ -1234,7 +1351,8 @@ var TAH_STATS = (function () {
   // 366 squares in one row: a square is a few pixels wide, so the colour has to
   // carry the count and the red bar the cancellation. Days outside the year on
   // screen do not exist in this grid at all.
-  function stripGrid(year, days) {
+  function stripGrid(year, strip) {
+    const days = strip && strip.days;
     const start = new Date(year, 0, 1);
     const count = daysBetween(start, new Date(year + 1, 0, 1));
     const columns = `repeat(${count}, minmax(2px, 1fr))`;
@@ -1265,23 +1383,40 @@ var TAH_STATS = (function () {
     });
     row.addEventListener('pointerleave', hideStripTip);
 
-    // Same column template as the squares, so a label sits exactly over its
-    // month even though the months have different lengths.
+    // The month row: same column template as the squares, so a cell sits exactly
+    // over its month even though the months have different lengths. It replaces
+    // the plain label row — the month names live in the cells now, because the
+    // row has to carry the figures anyway and a second line of labels under a
+    // second line of figures would only repeat itself.
     const months = el('div', { id: 'tah-strip-months', class: 'tah-strip-months' });
     months.style.gridTemplateColumns = columns;
-    for (let month = 0; month < 12; month += 1) {
-      const first = new Date(year, month, 1);
-      const length = new Date(year, month + 1, 0).getDate();
-      const label = el('button', {
-        class: 'tah-strip-month',
+    const stats = monthStats(year, days);
+    for (const stat of stats) {
+      const first = new Date(year, stat.month, 1);
+      const length = new Date(year, stat.month + 1, 0).getDate();
+      const cell = el('button', {
+        class: `tah-strip-month tah-day-n${stat.level}`,
         type: 'button',
-        text: MONTH_SHORT[month],
-        title: `${T.monthLabel(`${year}-${pad(month + 1)}`)} öffnen`,
+        'data-month': stat.key,
       });
-      label.style.gridColumn = `${daysBetween(start, first) + 1} / span ${length}`;
-      label.addEventListener('click', () => setPeriod('month', iso(first)));
-      months.append(label);
+      cell.style.gridColumn = `${daysBetween(start, first) + 1} / span ${length}`;
+      cell.setAttribute('aria-label', stripMonthAria(stat));
+      const head = el('span', { class: 'tah-strip-month-head' });
+      head.append(el('span', { class: 'tah-strip-month-name', text: MONTH_SHORT[stat.month] }));
+      if (stat.tours) head.append(el('span', { class: 'tah-strip-month-tours', text: String(stat.tours) }));
+      cell.append(head);
+      // "0 €" would read as a measured zero: a month without a booking is a dash,
+      // and a year that is still loading says so.
+      const money = !stat.loaded ? '…' : stat.income > 0 ? moneyShort(stat.income) : '–';
+      cell.append(el('span', { class: 'tah-strip-month-money', text: money }));
+      cell.addEventListener('click', () => setPeriod('month', iso(first)));
+      months.append(cell);
     }
+    months.addEventListener('pointerover', (event) => {
+      const cell = event.target.closest('.tah-strip-month');
+      if (cell && cell.dataset.month) showStripTip(cell);
+    });
+    months.addEventListener('pointerleave', hideStripTip);
 
     const inner = el('div', { class: 'tah-strip-inner' });
     inner.append(
@@ -1293,7 +1428,7 @@ var TAH_STATS = (function () {
     const scroll = el('div', { class: 'tah-strip-scroll' });
     scroll.append(inner);
     scroll.addEventListener('scroll', hideStripTip, { passive: true });
-    return { scroll, nodes };
+    return { scroll, nodes, stats };
   }
 
   // The period on screen, drawn under the row: a week is 7 columns wide and
@@ -1342,8 +1477,9 @@ var TAH_STATS = (function () {
     const year = Number(view.anchor.slice(0, 4));
     const strip = view.strip && view.strip.year === year ? view.strip : null;
     const keep = box.querySelector('.tah-strip-scroll')?.scrollLeft || 0;
-    const { scroll, nodes } = stripGrid(year, strip ? strip.days : null);
+    const { scroll, nodes, stats } = stripGrid(year, strip);
     view.stripNodes = nodes;
+    view.stripMonths = new Map(stats.map((stat) => [stat.key, stat]));
 
     const head = el('div', { class: 'tah-strip-head' });
     head.append(el('span', { class: 'tah-strip-title', text: `Jahresübersicht ${year}` }));

@@ -199,6 +199,9 @@ body.tah-stats-open {
   width: 9px;
   height: 9px;
   border-radius: 1px;
+  /* The lightest swatch of either scale is nearly the header's own white; a
+     hairline keeps it visible without changing the fill it stands for. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.09);
 }
 
 #tah-stats .tah-strip-scroll {
@@ -288,6 +291,11 @@ body.tah-stats-open {
   display: none;
 }
 
+/* The month row under the squares: one cell per month in the same column
+   template, so it lines up with the days above. It replaced the plain label row
+   — the month names live in the cells, because the row carries the figures
+   anyway. The fill is the month's income relative to the year's own range, in
+   the day squares' ramp: same heatmap, one scale coarser. */
 #tah-stats .tah-strip-months {
   display: grid;
   gap: 1px;
@@ -295,20 +303,91 @@ body.tah-stats-open {
 }
 
 #tah-stats .tah-strip-month {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
   min-width: 0;
-  padding: 0;
+  padding: 2px 4px 3px;
   border: 0;
-  background: none;
-  color: #9aa3ad;
+  border-radius: 2px;
+  color: #55606b;
   font-size: 9.5px;
-  line-height: 1.2;
-  text-align: center;
-  white-space: nowrap;
+  line-height: 1.15;
+  text-align: left;
+  overflow: hidden;
   cursor: pointer;
 }
 
+/* An outline rather than a colour, so the hover reads on all five fills. */
 #tah-stats .tah-strip-month:hover {
+  outline: 1px solid #1e4b8c;
+  outline-offset: -1px;
+}
+
+#tah-stats .tah-strip-month-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3px;
+  min-width: 0;
+}
+
+#tah-stats .tah-strip-month-name {
+  overflow: hidden;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#tah-stats .tah-strip-month-tours {
+  flex: none;
+  color: inherit;
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+#tah-stats .tah-strip-month-money {
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The fills are the day squares' own (`tah-day-n0…n4`): the strip is one
+   heatmap, so the month row is one scale coarser, not a second palette. Only
+   the text colour is the cell's business — the two darkest fills need white. */
+#tah-stats .tah-strip-month.tah-day-n0 {
+  color: #8a939d;
+}
+
+#tah-stats .tah-strip-month.tah-day-n1 {
   color: #1e4b8c;
+}
+
+#tah-stats .tah-strip-month.tah-day-n2 {
+  color: #1b3a63;
+}
+
+#tah-stats .tah-strip-month.tah-day-n3,
+#tah-stats .tah-strip-month.tah-day-n4 {
+  color: #fff;
+}
+
+/* The tour count is secondary text: it has to stay quieter than the amount, not
+   disappear on the two dark fills. */
+#tah-stats .tah-strip-month.tah-day-n3 .tah-strip-month-tours,
+#tah-stats .tah-strip-month.tah-day-n4 .tah-strip-month-tours {
+  color: inherit;
+  opacity: 0.75;
+}
+
+#tah-stats .tah-strip-legend-sep {
+  width: 1px;
+  height: 11px;
+  margin: 0 3px 0 9px;
+  background: #dde2e8;
 }
 
 /* Fixed and out of the flow: the squares scroll horizontally, an absolutely
