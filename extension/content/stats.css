@@ -252,10 +252,16 @@ body.tah-stats-open {
   background: #1e4b8c;
 }
 
-/* A cancellation is a red bar under the square, not a different fill: a day can
-   have both tours and a cancellation, and the count stays the main figure. */
+/* A cancellation is a bar on the square, not a different fill: a day can have
+   both tours and a cancellation, and the count stays the main figure. Borders
+   rather than a box-shadow, so a day can carry both bars at once — red at the
+   bottom for the group, amber at the top for the guide's own cancellation. */
 #tah-stats .tah-day-cancel {
-  box-shadow: inset 0 -3px 0 #c0392b;
+  border-bottom: 3px solid #c0392b;
+}
+
+#tah-stats .tah-day-own {
+  border-top: 3px solid #f0a30a;
 }
 
 /* The period on screen, drawn under its days, and today on the same line. */
@@ -348,6 +354,10 @@ body.tah-stats-open {
 
 #tah-stats .tah-strip-tip .tah-strip-tip-cancel {
   color: #ffb4a8;
+}
+
+#tah-stats .tah-strip-tip .tah-strip-tip-own {
+  color: #f6c66a;
 }
 
 #tah-stats .tah-strip-tip .tah-strip-tip-hint {

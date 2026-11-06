@@ -160,9 +160,12 @@
           for (let i = 0; i < count; i += 1) {
             const cat = CATEGORIES[Math.floor(rnd() * CATEGORIES.length)];
             const cancelled = rnd() < 0.08;
-            const billable = !cancelled || rnd() < 0.6;
+            // No amount means the group cancelled (a guide cancellation) or the
+            // guide was moved off a booking that still stands (Guidewechsel);
+            // both are skipped by the view, and the footer counts them apart.
+            const priced = cancelled ? rnd() < 0.6 : rnd() > 0.05;
             const PRICES = [97.5, 97.5, 105, 120, 75, 140];
-            const price = billable ? (cancelled ? 49 : PRICES[Math.floor(rnd() * PRICES.length)]) : 0;
+            const price = priced ? (cancelled ? 49 : PRICES[Math.floor(rnd() * PRICES.length)]) : 0;
             id += 1;
             MOCK.push({
               id: String(id),
@@ -173,7 +176,7 @@
               tour: 'Gruppe 1',
               participants: cat[2],
               price,
-              fee: cancelled ? 'Ausfallhonorar' : 'Honorar',
+              fee: !priced ? '' : cancelled ? 'Ausfallhonorar' : 'Honorar',
               offer: cat[1],
               category: cat[0],
             });

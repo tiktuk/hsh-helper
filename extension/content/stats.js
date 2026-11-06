@@ -364,6 +364,15 @@ var TAH_STATS = (function () {
     const billable = bookings.filter((row) => row.price > 0);
     const tours = billable.filter((row) => !row.cancelled);
     const cancellations = billable.filter((row) => row.cancelled);
+    // Who called a cancellation off is not written anywhere the extension can
+    // read — both kinds carry "Die Buchung wurde storniert" and "Es wurde ein
+    // Guidewechsel durchgeführt" in the Hinweise. The Ausfallhonorar is the
+    // difference: the group pays one when it cancels, and there is none when the
+    // guide did. A row without an amount that was never cancelled is the third
+    // case, a booking the guide was moved off.
+    const cancelled = bookings.filter((row) => row.cancelled);
+    const guideCancels = cancelled.filter((row) => row.price <= 0);
+    const reassigned = bookings.filter((row) => !row.cancelled && row.price <= 0);
     const minutes = sum(tours, 'duration');
     const days = new Set(tours.map((row) => row.date));
     // Weeks that actually have a tour: a year has many empty weeks, so counting
@@ -373,6 +382,8 @@ var TAH_STATS = (function () {
       billable,
       tours,
       cancellations,
+      guideCancels,
+      reassigned,
       income: sum(billable, 'price'),
       tourIncome: sum(tours, 'price'),
       feeIncome: sum(cancellations, 'price'),
@@ -380,7 +391,7 @@ var TAH_STATS = (function () {
       participants: sum(tours, 'participants'),
       days: days.size,
       weeks: weeks.size,
-      skipped: bookings.length - billable.length,
+      skipped: guideCancels.length + reassigned.length,
     };
   }
 
@@ -1080,15 +1091,23 @@ var TAH_STATS = (function () {
   function stripDays(bookings) {
     const days = new Map();
     for (const row of bookings) {
-      if (!(row.price > 0)) continue;
-      const entry = days.get(row.date) || { tours: [], cancellations: [] };
-      (row.cancelled ? entry.cancellations : entry.tours).push(row);
+      // Three things can sit on a day: a tour that happened, a cancellation by
+      // the group (it pays an Ausfallhonorar) and one by the guide (no amount at
+      // all). A row the guide was moved off belongs to no day — nothing was
+      // ever booked there for them.
+      const kind = row.cancelled ? (row.price > 0 ? 'client' : 'own') : row.price > 0 ? 'tour' : null;
+      if (!kind) continue;
+      const entry = days.get(row.date) || { tours: [], cancellations: [], own: [] };
+      if (kind === 'tour') entry.tours.push(row);
+      else if (kind === 'client') entry.cancellations.push(row);
+      else entry.own.push(row);
       days.set(row.date, entry);
     }
     const byStart = (a, b) => String(a.time).localeCompare(String(b.time));
     for (const entry of days.values()) {
       entry.tours.sort(byStart);
       entry.cancellations.sort(byStart);
+      entry.own.sort(byStart);
     }
     return days;
   }
@@ -1102,11 +1121,13 @@ var TAH_STATS = (function () {
     const entries = [...strip.days.values()];
     const tours = entries.reduce((total, entry) => total + entry.tours.length, 0);
     const cancels = entries.reduce((total, entry) => total + entry.cancellations.length, 0);
+    const own = entries.reduce((total, entry) => total + entry.own.length, 0);
     const workdays = entries.filter((entry) => entry.tours.length).length;
     const parts = [
       `${tours} ${tours === 1 ? 'Einsatz' : 'Einsätze'}`,
       `${workdays} ${workdays === 1 ? 'Arbeitstag' : 'Arbeitstage'}`,
-      cancels ? `${cancels} ${cancels === 1 ? 'Absage' : 'Absagen'}` : '',
+      cancels ? `${cancels} ${cancels === 1 ? 'Absage' : 'Absagen'} der Kundschaft` : '',
+      own ? `${own} ${own === 1 ? 'Absage' : 'Absagen'} durch dich` : '',
       strip.loading ? 'lädt …' : '',
       strip.failed ? `${strip.failed} nicht geladen` : '',
     ];
@@ -1119,8 +1140,10 @@ var TAH_STATS = (function () {
     for (let level = 0; level <= STRIP_MAX; level += 1) {
       legend.append(el('i', { class: `tah-strip-swatch tah-day-n${level}`, title: `${level === STRIP_MAX ? `${level}+` : level}` }));
     }
-    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Absage' }));
-    legend.append(el('i', { class: 'tah-strip-swatch tah-day-n2 tah-day-cancel', title: 'Absage' }));
+    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Absage (Kundschaft)' }));
+    legend.append(el('i', { class: 'tah-strip-swatch tah-day-n2 tah-day-cancel', title: 'Absage durch die Kundschaft' }));
+    legend.append(el('span', { class: 'tah-strip-legend-label', text: 'Absage (durch dich)' }));
+    legend.append(el('i', { class: 'tah-strip-swatch tah-day-n0 tah-day-own', title: 'Absage durch dich' }));
     return legend;
   }
 
@@ -1131,6 +1154,7 @@ var TAH_STATS = (function () {
     if (entry.cancellations.length) {
       parts.push(`${entry.cancellations.length} ${entry.cancellations.length === 1 ? 'Absage' : 'Absagen'}`);
     }
+    if (entry.own.length) parts.push(`${entry.own.length} Absage${entry.own.length === 1 ? '' : 'n'} durch dich`);
     return `${dayLabel(key)}: ${parts.join(', ')}`;
   }
 
@@ -1164,7 +1188,16 @@ var TAH_STATS = (function () {
         lines.push(
           el('span', {
             class: 'tah-strip-tip-cancel',
-            text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} · ${T.formatMoney(stripIncome(entry.cancellations))} Ausfallhonorar`,
+            text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} der Kundschaft · ${T.formatMoney(stripIncome(entry.cancellations))} Ausfallhonorar`,
+          })
+        );
+      }
+      if (entry.own.length) {
+        const count = entry.own.length;
+        lines.push(
+          el('span', {
+            class: 'tah-strip-tip-own',
+            text: `${count} ${count === 1 ? 'Absage' : 'Absagen'} durch dich · ohne Honorar`,
           })
         );
       }
@@ -1215,6 +1248,7 @@ var TAH_STATS = (function () {
       const level = entry ? Math.min(STRIP_MAX, entry.tours.length) : 0;
       const classes = ['tah-day', `tah-day-n${level}`];
       if (entry && entry.cancellations.length) classes.push('tah-day-cancel');
+      if (entry && entry.own.length) classes.push('tah-day-own');
       const square = el('button', { class: classes.join(' '), type: 'button', 'data-date': key, tabindex: '-1' });
       square.setAttribute('aria-label', stripAria(key, entry));
       nodes.set(key, square);
@@ -1530,9 +1564,14 @@ var TAH_STATS = (function () {
     const small = el('div', { class: 'tah-kpis tah-kpis-small' });
     small.append(
       kpi(String(agg.participants.toLocaleString('de-DE')), 'Teilnehmende', agg.tours.length ? `Ø ${Math.round(agg.participants / agg.tours.length)} pro Einsatz` : ''),
-      kpi(agg.cancellations.length ? String(agg.cancellations.length) : '0', 'Absagen', agg.cancellations.length ? T.formatMoney(agg.feeIncome) : 'keine'),
+      kpi(
+        String(agg.cancellations.length),
+        'Absagen (Kundschaft)',
+        agg.cancellations.length ? `${T.formatMoney(agg.feeIncome)} Ausfallhonorar` : 'keine'
+      ),
+      kpi(String(agg.guideCancels.length), 'Absagen (durch dich)', agg.guideCancels.length ? 'ohne Honorar' : 'keine'),
       kpi(agg.weeks ? (agg.tours.length / agg.weeks).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '0', 'Einsätze / Woche', agg.weeks ? `über ${agg.weeks} ${agg.weeks === 1 ? 'Woche' : 'Wochen'}` : ''),
-      kpi(agg.billable.length ? `${Math.round((agg.cancellations.length / agg.billable.length) * 100)} %` : '–', 'Absagequote', 'der berechenbaren Buchungen')
+      kpi(agg.billable.length ? `${Math.round((agg.cancellations.length / agg.billable.length) * 100)} %` : '–', 'Absagequote', 'nur Absagen der Kundschaft')
     );
     body.append(small);
     if (period === 'year') body.append(pipelineRow());
@@ -1569,11 +1608,14 @@ var TAH_STATS = (function () {
     }
 
     const notes = [];
-    if (agg.skipped) {
-      notes.push(
-        `${agg.skipped} ${agg.skipped === 1 ? 'Buchung' : 'Buchungen'} ohne Honorar nicht gezählt (Absage durch dich oder Guidewechsel).`
-      );
+    const skipped = [];
+    if (agg.guideCancels.length) {
+      skipped.push(`${agg.guideCancels.length} ${agg.guideCancels.length === 1 ? 'Absage' : 'Absagen'} durch dich`);
     }
+    if (agg.reassigned.length) {
+      skipped.push(`${agg.reassigned.length} ${agg.reassigned.length === 1 ? 'Buchung' : 'Buchungen'} nach Guidewechsel`);
+    }
+    if (skipped.length) notes.push(`${skipped.join(' und ')} ohne Honorar — nicht berechnet.`);
     if (view.data.failed) notes.push(`${view.data.failed} ${view.data.failed === 1 ? 'Buchung' : 'Buchungen'} konnten nicht geladen werden.`);
     notes.push('Daten aus der Buchungsliste und den Abrechnungsbeträgen der Buchungsdetails. Zwischengespeichert, „↻“ lädt neu.');
     body.append(el('p', { class: 'tah-stats-note', text: notes.join(' ') }));

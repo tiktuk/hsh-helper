@@ -264,14 +264,20 @@ booking list and Abrechnung amounts the invoice uses.
 At the top you switch between **Woche**, **Monat** and **Jahr**; the arrows move
 one period back or forward. Across the header runs a **Jahresübersicht**: one
 small square per day of the year, as dark as the day was busy, with a red mark
-when a booking of that day was cancelled. Hovering a square names the tours of
-that day, its income and any Ausfallhonorar; a click opens that day's week, a
-click on a month name opens the month. The line under the row marks the period
-on screen, the small dark tick today. Below that:
+when the group cancelled a booking of that day and an amber one when you did.
+Hovering a square names the tours of that day, its income, any Ausfallhonorar
+and the cancellations; a click opens that day's week, a click on a month name
+opens the month. The line under the row marks the period on screen, the small
+dark tick today. Below that:
 
 - **Einnahmen, Einsätze, Ø pro Einsatz, Arbeitszeit** — the headline numbers,
   with the Ausfallhonorar of group cancellations called out separately.
-- **Teilnehmende, Absagen, Einsätze pro Woche, Absagequote** — the smaller row.
+- **Teilnehmende, Absagen (Kundschaft), Absagen (durch dich), Einsätze pro
+  Woche, Absagequote** — the smaller row. The two cancellation figures are split
+  by who called the tour off: a cancellation by the group brings an
+  Ausfallhonorar, one by the guide has no amount at all. That is the only
+  difference the booking page shows — the notes read the same either way — so it
+  is what the statistics go by.
 - **Noch ausstehend** and **Prognose zum 31.12.** (year view) — two cards side by
   side. *Noch ausstehend* is the money already booked but not yet earned: every
   confirmed tour from today on, up to a year ahead, with the number of tours and
@@ -298,9 +304,11 @@ on screen, the small dark tick today. Below that:
 - **Auffälligkeiten** — the strongest weekday, the busiest start time, the best
   month, the most frequent offer, the average group size.
 
-Only bookings with an amount count: a cancellation by the group brings its
-Ausfallhonorar and stays in, while a cancellation by the guide or a booking you
-were moved off has no amount and is left out (the footer says how many).
+Only bookings with an amount count as work: a cancellation by the group brings
+its Ausfallhonorar and stays in, while a cancellation by the guide or a booking
+you were moved off has no amount and stays out of the income. The guide's own
+cancellations still get their own figure, and the footer says how many bookings
+were left out after a Guidewechsel.
 
 **Arbeitsweg und Pausen.** The assumptions behind the commute figures live in
 the extension settings (toolbar icon → **Einstellungen …**, or the

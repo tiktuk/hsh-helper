@@ -319,9 +319,18 @@ Data is the same two sources the invoice uses, only wider:
   per booking id, 7 days TTL, refetched when the row's cancellation status
   changed, pruned after 400 days. **↻** forces both. Switching periods after the
   first load issues no requests.
-- Only rows with `price > 0` count, exactly like the invoice: a group
+- Only rows with `price > 0` count as work, exactly like the invoice: a group
   cancellation brings its Ausfallhonorar, a guide cancellation or reassignment
-  has no amount and is reported in the footer as skipped.
+  has no amount.
+- Who cancelled is **not** written anywhere readable: a group cancellation and a
+  guide cancellation both show "Die Buchung wurde storniert" and "Dein Status:
+  Es wurde ein Guidewechsel durchgeführt" in the Hinweise (checked against the
+  live detail pages). The Ausfallhonorar is the only difference — the group pays
+  one, the guide's cancellation leaves the Abrechnung box empty. `aggregate()`
+  therefore splits `cancelled && price > 0` (Kundschaft) from
+  `cancelled && price <= 0` (durch dich), and keeps `!cancelled && price <= 0`
+  (Guidewechsel) apart: the guide did not cancel that one, the museum moved it.
+  Do not "improve" this by reading the Hinweise.
 
 `enrichBooking` also fills `offer` (`Angebot`), `category`
 (`Angebotskategorie`) and `participants` (`Teilnehmende`) from the detail page's
@@ -355,15 +364,18 @@ nothing would be drawn, so nothing should be fetched.
 **Jahresübersicht** (`#tah-yearstrip`) is the one figure that is not about the
 period: a row of 365/366 squares in the sticky header, one per day of the
 anchor's year. Colour is the number of billable tours that day (`tah-day-n0…n4`,
-four and more share the darkest), a red bar along the square's bottom edge means
-at least one Absage (a day can have both), and a dark tick under the row marks
-today. Only rows with `price > 0` count, exactly like the KPIs, so the summary
-line always agrees with the year view. The squares are a few pixels wide because
+four and more share the darkest); a red bar along the bottom edge means at least
+one Absage by the group, an amber bar along the top edge one by the guide (a day
+can carry both — borders, not `box-shadow`, or the second rule would overwrite
+the first), and a dark tick under the row marks today. Tours count only with
+`price > 0`, exactly like the KPIs; a cancelled row without an amount paints the
+amber bar and is not a tour. The squares are a few pixels wide because
 366 days have to fit one row; below ~1100 px the row scrolls horizontally
 (`minmax(2px, 1fr)` columns, month labels in a second grid with the same
-template). Hovering shows a tooltip with the day's tours, its income and its
-Ausfallhonorar — `position: fixed`, because the row is a scroll container and an
-absolute tooltip would be clipped; Escape closes it before it closes the view.
+template). Hovering shows a tooltip with the day's tours, its income, its
+Ausfallhonorar and its own cancellations — `position: fixed`, because the row is
+a scroll container and an absolute tooltip would be clipped; Escape closes it
+before it closes the view.
 Clicking a square opens that day's week and a month label that month, which is
 what the optional `anchor` on `setPeriod(period, anchor)` is for (the segmented
 control still starts at today). The band under the row marks the period on

@@ -14,10 +14,11 @@ started; from 1.3.0 on, each release is written when it is cut.
 ### Added
 
 - **Jahresübersicht** above the statistics: one small square per day of the
-  year, as dark as the day was busy, with a red mark when a booking of that day
-  was cancelled. Hovering names the day's tours, its income and any
-  Ausfallhonorar; a click opens that day's week, a click on a month name opens
-  the month. A line under the row marks the period on screen, a tick today.
+  year, as dark as the day was busy, with a red mark when the group cancelled a
+  booking of that day and an amber one when the guide cancelled it. Hovering
+  names the day's tours, its income and any Ausfallhonorar; a click opens that
+  day's week, a click on a month name opens the month. A line under the row
+  marks the period on screen, a tick today.
 - **Noch ausstehend** card in the year view: the money already booked but not
   yet earned, from today up to a year ahead, with the next tour and the split
   over the months.
@@ -26,6 +27,12 @@ started; from 1.3.0 on, each release is written when it is cut.
   A dialog shows what it would set before anything is written.
 - Several calendars in the availability overlay, each with its own name and
   colour, and `webcal://` as well as `webdav://` / `webdavs://` feed addresses.
+- **Absagen** is split into **Absagen (Kundschaft)** and **Absagen (durch
+  dich)**, in the figures and on the year strip. The booking page does not say
+  who cancelled; the Ausfallhonorar does — the group's cancellation carries one,
+  the guide's has no amount at all. The Absagequote now says it counts the
+  group's cancellations only, and the footer keeps Guidewechsel apart from the
+  guide's own cancellations.
 
 ### Changed
 
