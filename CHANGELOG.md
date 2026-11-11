@@ -13,6 +13,15 @@ started; from 1.3.0 on, each release is written when it is cut.
 
 ### Added
 
+- **Einnahmen je Tag** in the year view: the year as a calendar — one column per
+  week, one row per weekday, each day as dark as it earned. A weekday row that
+  stays pale all year is a day you are never booked on, which one row of 366
+  squares cannot show. The colour is the day's income (Honorar and
+  Ausfallhonorar) between the quietest and the busiest day of the year; a red
+  edge still marks a cancellation by the group, an amber one a cancellation by
+  you, and today keeps its ring. Hovering names the day's tours, its income and
+  any cancellation, a click opens that day's week, a click on a month name opens
+  the month.
 - **Jahresübersicht** gets a month row: under the squares, one cell per month
   with its name, its income and its number of tours, filled in the same colours
   as the day squares — the weakest month of the year lightest, the best darkest.

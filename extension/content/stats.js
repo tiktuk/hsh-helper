@@ -74,6 +74,7 @@ var TAH_STATS = (function () {
     stripToken: 0,
     stripNodes: new Map(),
     stripMonths: new Map(),
+    heat: null,
     commute: { ...COMMUTE_DEFAULTS },
     bikePhoto: '',
     charts: {},
@@ -932,6 +933,7 @@ var TAH_STATS = (function () {
     view.stripToken += 1;
     view.stripNodes = new Map();
     view.stripMonths = new Map();
+    view.heat = null;
     document.body.classList.remove('tah-stats-open');
     markNav(false);
     window.removeEventListener('resize', onResize);
@@ -1312,6 +1314,15 @@ var TAH_STATS = (function () {
     if (tip) tip.classList.remove('tah-strip-tip-on');
   }
 
+  // The day entry for a tooltip, from whichever heatmap has it: the calendar card
+  // is drawn from the bookings in memory, the header strip from its own year load.
+  // A date belongs to exactly one year, so the two maps cannot disagree.
+  function stripEntry(key) {
+    const heat = view.heat && view.heat.days;
+    const strip = view.strip && view.strip.days;
+    return (heat && heat.get(key)) || (strip && strip.get(key)) || null;
+  }
+
   // Fixed, not absolute: the squares live in a horizontally scrolling grid, and
   // an absolutely positioned tooltip would be clipped by it. Coordinates are
   // read from the square itself and clamped to the window.
@@ -1336,8 +1347,8 @@ var TAH_STATS = (function () {
       };
       lines = stripMonthTipLines(stat);
     } else {
-      const loading = Boolean(view.strip && view.strip.loading);
-      lines = stripTipLines(key, (view.strip && view.strip.days && view.strip.days.get(key)) || null, loading);
+      const loading = Boolean(!view.heat && view.strip && view.strip.loading);
+      lines = stripTipLines(key, stripEntry(key), loading);
     }
     tip.replaceChildren(...lines);
     tip.dataset.key = key;
@@ -1345,7 +1356,11 @@ var TAH_STATS = (function () {
     const rect = cell.getBoundingClientRect();
     const left = Math.max(6, Math.min(rect.left + rect.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 6));
     tip.style.left = `${Math.round(left)}px`;
-    tip.style.top = `${Math.round(rect.bottom + 7)}px`;
+    // The strip sits at the top of the window and always has room below it; the
+    // calendar card does not, so a cell near the bottom edge flips the tooltip up.
+    const below = rect.bottom + 7;
+    const top = below + tip.offsetHeight > window.innerHeight - 6 ? rect.top - tip.offsetHeight - 7 : below;
+    tip.style.top = `${Math.round(top)}px`;
   }
 
   // 366 squares in one row: a square is a few pixels wide, so the colour has to
@@ -1524,6 +1539,204 @@ var TAH_STATS = (function () {
       view.strip = { year, days: previous, error: err.message };
     }
     renderStrip();
+  }
+
+  /* ---------- calendar heatmap ---------- */
+
+  // The year as a calendar: one column per week, one row per weekday. The strip in
+  // the header answers "where in the year am I"; this card answers "when does the
+  // money come in" — a weekday row that stays pale all year is a day the guide is
+  // never booked on, which one row of 366 squares cannot show.
+  //
+  // The fill is the day's income, not its tour count: the strip already counts
+  // tours, and money is what the rest of the view is about. Same ramp and the same
+  // min/max rule as the month row under the strip, so the two heatmaps read as one
+  // scale. Year view only, and drawn from the bookings already in memory.
+  const HEAT_WORDS = ['keine Einnahmen', 'schwacher Tag', 'mittlerer Tag', 'starker Tag', 'stärkster Tag'];
+
+  // Income is what `aggregate()` calls income: the tours plus the Ausfallhonorar
+  // of the group's cancellations. A guide cancellation carries no amount, so it
+  // adds nothing here and only paints its amber edge.
+  function heatIncome(entry) {
+    return entry ? stripIncome(entry.tours) + stripIncome(entry.cancellations) : 0;
+  }
+
+  // Relative to the year's own earning days, not to zero — the same rule as
+  // `monthStats()`: a guide with a steady year would otherwise get one flat step,
+  // and the question the card answers is "which days carried the year".
+  function heatScale(days) {
+    let min = Infinity;
+    let max = 0;
+    for (const entry of days.values()) {
+      const income = heatIncome(entry);
+      if (income <= 0) continue;
+      min = Math.min(min, income);
+      max = Math.max(max, income);
+    }
+    return max > 0 ? { min, max } : null;
+  }
+
+  function heatLevel(income, scale) {
+    if (income <= 0 || !scale) return 0;
+    if (scale.max === scale.min) return STRIP_MAX;
+    return 1 + Math.round(((income - scale.min) / (scale.max - scale.min)) * (STRIP_MAX - 1));
+  }
+
+  function heatAria(key, entry) {
+    if (!entry) return `${dayLabel(key)}: keine Einnahmen`;
+    const parts = [];
+    if (entry.tours.length) parts.push(`${entry.tours.length} ${entry.tours.length === 1 ? 'Einsatz' : 'Einsätze'}`);
+    const income = heatIncome(entry);
+    if (income) parts.push(moneyShort(income));
+    if (entry.cancellations.length) {
+      const count = entry.cancellations.length;
+      parts.push(`${count} Absage${count === 1 ? '' : 'n'} der Kundschaft`);
+    }
+    if (entry.own.length) {
+      const count = entry.own.length;
+      parts.push(`${count} Absage${count === 1 ? '' : 'n'} durch dich`);
+    }
+    return `${dayLabel(key)}: ${parts.join(', ')}`;
+  }
+
+  function heatSummary(days, failed) {
+    let income = 0;
+    let workdays = 0;
+    let tours = 0;
+    let cancellations = 0;
+    for (const entry of days.values()) {
+      income += heatIncome(entry);
+      tours += entry.tours.length;
+      cancellations += entry.cancellations.length;
+      if (entry.tours.length) workdays += 1;
+    }
+    const parts = [
+      income ? `${T.formatMoney(income)} Einnahmen` : 'keine Einnahmen',
+      workdays ? `${workdays} ${workdays === 1 ? 'Arbeitstag' : 'Arbeitstage'}` : '',
+      tours ? `${tours} ${tours === 1 ? 'Einsatz' : 'Einsätze'}` : '',
+      cancellations ? `${cancellations} ${cancellations === 1 ? 'Absage' : 'Absagen'} der Kundschaft` : '',
+      failed ? `${failed} nicht geladen` : '',
+    ];
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  // A month label starts at the week column holding its 1st and spans up to the
+  // column before the next month's, so the label sits exactly over its own days.
+  function heatMonths(year, columns) {
+    const start = startOfWeek(new Date(year, 0, 1));
+    const columnOf = (date) => Math.floor(daysBetween(start, date) / 7) + 1;
+    return Array.from({ length: 12 }, (_, month) => {
+      const first = new Date(year, month, 1);
+      const column = columnOf(first);
+      const next = month === 11 ? columns + 1 : columnOf(new Date(year, month + 1, 1));
+      return { month, first, column, span: Math.max(1, next - column) };
+    });
+  }
+
+  // The grid starts on the Monday of the week that holds 1 January, so a year
+  // begins and ends mid-column; the days of the neighbouring years keep the grid
+  // rectangular and are not drawn at all.
+  function heatGrid(year, days, scale) {
+    const start = startOfWeek(new Date(year, 0, 1));
+    const columns = Math.ceil(daysBetween(start, new Date(year + 1, 0, 1)) / 7);
+    const template = `repeat(${columns}, var(--heat-cell))`;
+    const today = iso(new Date());
+
+    const months = el('div', { class: 'tah-heat-months' });
+    months.style.gridTemplateColumns = template;
+    for (const item of heatMonths(year, columns)) {
+      const key = `${year}-${pad(item.month + 1)}`;
+      const label = el('button', {
+        class: 'tah-heat-month',
+        type: 'button',
+        text: MONTH_SHORT[item.month],
+        title: `${T.monthLabel(key)} öffnen`,
+      });
+      label.style.gridColumn = `${item.column} / span ${item.span}`;
+      label.addEventListener('click', () => setPeriod('month', iso(item.first)));
+      months.append(label);
+    }
+
+    const weekdays = el('div', { class: 'tah-heat-weekdays' });
+    for (const label of WEEKDAY_SHORT) weekdays.append(el('span', { text: label }));
+
+    const grid = el('div', { class: 'tah-heat-grid' });
+    grid.style.gridTemplateColumns = template;
+    for (let index = 0; index < columns * 7; index += 1) {
+      const date = addDays(start, index);
+      if (date.getFullYear() !== year) {
+        grid.append(el('i', { class: 'tah-heat-pad' }));
+        continue;
+      }
+      const key = iso(date);
+      const entry = days.get(key) || null;
+      const classes = ['tah-heat-cell', `tah-day-n${heatLevel(heatIncome(entry), scale)}`];
+      if (entry && entry.cancellations.length) classes.push('tah-day-cancel');
+      if (entry && entry.own.length) classes.push('tah-day-own');
+      if (key === today) classes.push('tah-heat-today');
+      const cell = el('button', { class: classes.join(' '), type: 'button', 'data-date': key, tabindex: '-1' });
+      cell.setAttribute('aria-label', heatAria(key, entry));
+      grid.append(cell);
+    }
+
+    grid.addEventListener('click', (event) => {
+      const cell = event.target.closest('.tah-heat-cell');
+      if (cell && cell.dataset.date) setPeriod('week', cell.dataset.date);
+    });
+    // The strip's tooltip, verbatim: same lines, same hint, same fixed position —
+    // the entry lookup in `showStripTip` prefers this card's own day map.
+    grid.addEventListener('pointerover', (event) => {
+      const cell = event.target.closest('.tah-heat-cell');
+      if (cell && cell.dataset.date) showStripTip(cell);
+    });
+    grid.addEventListener('pointerleave', hideStripTip);
+
+    const inner = el('div', { class: 'tah-heat-inner' });
+    inner.append(months, weekdays, grid);
+    const scroll = el('div', { class: 'tah-heat-scroll' });
+    scroll.append(inner);
+    scroll.addEventListener('scroll', hideStripTip, { passive: true });
+    return scroll;
+  }
+
+  function heatLegend() {
+    const legend = el('div', { class: 'tah-heat-legend' });
+    legend.append(el('span', { class: 'tah-heat-legend-label', text: 'Weniger' }));
+    for (let level = 0; level <= STRIP_MAX; level += 1) {
+      legend.append(el('i', { class: `tah-strip-swatch tah-day-n${level}`, title: HEAT_WORDS[level] }));
+    }
+    legend.append(el('span', { class: 'tah-heat-legend-label', text: 'Mehr' }));
+    return legend;
+  }
+
+  function heatCard(year, bookings, failed) {
+    const days = stripDays(bookings);
+    const scale = heatScale(days);
+    // Kept for the tooltip: the header strip's own map is filled after this card
+    // is drawn (`useStripFromData`), so a tooltip reading only that one would say
+    // "lädt …" over a cell that has data.
+    view.heat = { year, days };
+
+    const box = el('section', { id: 'tah-heat', class: 'tah-heat' });
+    const head = el('div', { class: 'tah-heat-head' });
+    head.append(
+      el('h3', { text: `Einnahmen je Tag · ${year}` }),
+      el('span', { class: 'tah-heat-summary', text: heatSummary(days, failed) })
+    );
+
+    const foot = el('div', { class: 'tah-heat-foot' });
+    foot.append(heatLegend());
+    foot.append(
+      el('span', {
+        class: 'tah-heat-note',
+        text: scale
+          ? `Farbe: Einnahmen des Tages (Honorar und Ausfallhonorar), Stufen zwischen ${moneyShort(scale.min)} und ${moneyShort(scale.max)}`
+          : 'Farbe: Einnahmen des Tages (Honorar und Ausfallhonorar)',
+      })
+    );
+
+    box.append(head, heatGrid(year, days, scale), foot);
+    return box;
   }
 
   /* ---------- commute & pauses ---------- */
@@ -1710,7 +1923,13 @@ var TAH_STATS = (function () {
       kpi(agg.billable.length ? `${Math.round((agg.cancellations.length / agg.billable.length) * 100)} %` : '–', 'Absagequote', 'nur Absagen der Kundschaft')
     );
     body.append(small);
-    if (period === 'year') body.append(pipelineRow());
+    if (period === 'year') {
+      body.append(pipelineRow());
+      // The year as a calendar, next to the figures about the whole year: the
+      // strip above draws it in one line, this card shows which weekdays the money
+      // actually lands on.
+      body.append(heatCard(yearOf(range), view.data.bookings, view.data.failed));
+    }
 
     if (agg.tours.length) body.append(workloadCard(view.data.workload));
 
@@ -2198,6 +2417,9 @@ var TAH_STATS = (function () {
     view.loading = true;
     view.error = '';
     view.data = null;
+    // The calendar card belongs to the year view; a period change must not leave
+    // its day map answering the header strip's tooltips.
+    view.heat = null;
     const body = document.querySelector('#tah-stats-body');
     if (body) body.replaceChildren(el('p', { class: 'tah-stats-empty', text: 'Lade Buchungen …' }));
     destroyCharts();

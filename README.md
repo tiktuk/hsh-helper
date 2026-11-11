@@ -286,6 +286,11 @@ dark tick today. Below that:
   — their Ausfallhonorar is income, but the tour is not going to happen.
   *Prognose* is what the year will most likely end at, with a range and how much
   of it is already booked.
+- **Einnahmen je Tag** (year view) — the year as a calendar: one column per
+  week, one row per weekday, each day as dark as it earned. A weekday row that
+  stays pale all year is a day you are never booked on. Hovering names the day's
+  tours, its income and any cancellation, a click opens that day's week, a click
+  on a month name opens the month.
 - **Effektiver Stundensatz, Wartezeit, Ø Pause je Arbeitstag, Effizienz** — what
   an hour really pays once the pause between two tours and the ride to the
   museum are counted, not just the tour time.

@@ -397,6 +397,41 @@ opens the month. Both `view.stripMonths` (the 12 stats, keyed by `YYYY-MM`) and
 `view.stripNodes` are rebuilt by `renderStrip()`, and the tooltip reads the map
 rather than recomputing, so it can never disagree with the cell it sits on.
 
+**Einnahmen je Tag** (`#tah-heat`, `heatCard`) is the year as a calendar, in the
+body and in the year view only — next to the pipeline row, before the workload
+block. The strip above draws the same year as one row of 366 squares; this card is
+the one you read, so it has 7 weekday rows × 53/54 week columns, month labels over
+their own columns, and a **Weniger … Mehr** legend. The grid starts on the Monday
+of the week that holds 1 January and ends on the Sunday of the week that holds 31
+December, so the first and last column carry days of the neighbouring years; those
+are `tah-heat-pad` and are not drawn at all. A leap year that starts on a Sunday
+needs 54 columns (2012), which still fits.
+
+The fill is the day's **income**, not its tour count (the strip already counts
+tours): `heatIncome()` = the tours' Honorar plus the Ausfallhonorar of the group's
+cancellations, exactly `aggregate()`'s `income`. It uses the strip's own ramp
+(`tah-day-n0…n4`) and the month row's rule — `heatScale()` takes the min and max of
+the year's earning days and `heatLevel()` spreads 1…4 over that span, so a steady
+year does not collapse into one step. Cancellation bars keep their meaning at 2 px
+(a 16/17 px square is not a 6 px one), and today gets a ring.
+
+The card is drawn from `view.data.bookings` through `stripDays()` — **not** from
+`view.strip`, which `useStripFromData()` only fills *after* `render()`. Its day map
+is kept as `view.heat` and `showStripTip()` reads it first (`stripEntry()`), so a
+cell never says "lädt …" while the header strip is still loading; `load()` and
+`close()` clear `view.heat` so a period change cannot leave the strip's tooltip
+answering from a stale year. The tooltip is the strip's own, so the lines, the
+Escape handling and the "Klick öffnet die Woche" hint are not duplicated. A click
+on a square opens that day's week, a click on a month label opens the month.
+
+The grid is a fixed `--heat-cell: 17px` (53 columns = 1057 px, 54 = 1077 px, inside
+the 1106 px the card has at full width); narrower windows scroll it sideways.
+Month labels, weekday labels and the squares are one inner grid, which is what
+keeps the labels over their own columns and rows — the price is that the weekday
+labels scroll with the weeks. Do not put a `background` on `.tah-heat-cell`: it
+would win over the shared `tah-day-n0…n4` ramp and every square would come out the
+same pale grey.
+
 The year view already holds its year, so the strip is derived from
 `view.data.bookings` (`useStripFromData`) and costs nothing. Every other period
 loads the year through `loadBookings` in `loadYearStrip()`, **after** the period
